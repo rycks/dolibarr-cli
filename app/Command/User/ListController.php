@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Command\Users;
+namespace App\Command\User;
 
 use Minicli\Command\CommandController;
 use Minicli\Input;
@@ -19,7 +19,7 @@ class ListController extends CommandController
     {
         global $db, $conf;
         $force = false;
-        $this->info('Get list of dolibarr users');
+        $this->info('Get list of dolibarr user');
 
         require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
         $users = new \User($db);

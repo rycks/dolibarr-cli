@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Command\Users;
+namespace App\Command\User;
 
 use Minicli\Command\CommandController;
 
@@ -12,8 +12,8 @@ class DefaultController extends CommandController
     {
         $this->info("All of dolibarr cli for user manipulation
 Usage:
- - dolibarr users password --help
- - dolibarr users edit --help
- - dolibarr users list --help");
+ - dolibarr user password --help
+ - dolibarr user edit --help
+ - dolibarr user list --help");
     }
 }

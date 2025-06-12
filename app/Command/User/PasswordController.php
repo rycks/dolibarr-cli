@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Command\Users;
+namespace App\Command\User;
 
 use Minicli\Command\CommandController;
 use Minicli\Input;
