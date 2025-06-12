@@ -32,7 +32,6 @@ class PasswordController extends CommandController
 
         if ($this->hasFlag('force')) {
             $force = true;
-            $this->usage();
         }
 
         if ($this->hasParam('login')) {
