@@ -13,6 +13,7 @@ class DefaultController extends CommandController
         $this->info("All of dolibarr cli for user manipulation
 Usage:
  - dolibarr users password --help
+ - dolibarr users edit --help
  - dolibarr users list --help");
     }
 }
