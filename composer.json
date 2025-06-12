@@ -1,0 +1,36 @@
+{
+  "name": "dolibarr/application",
+  "description": "Dolibarr CLI",
+  "license": "GPLv3",
+  "homepage": "https://github.com/dolibarr/dolibarr",
+  "keywords": ["cli","command-line", "template"],
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  },
+  "require": {
+    "php": ">=8.1",
+    "minicli/minicli": "^4.2",
+    "minicli/command-help": "^1.0"
+  },
+  "require-dev": {
+    "pestphp/pest": "^1.23",
+    "laravel/pint": "^1.10",
+    "humbug/box": "^4.6"
+  },
+  "scripts": {
+    "lint" : ["pint"],
+    "test:lint" : ["pint --test"],
+    "test:unit" : ["pest"],
+    "test" : [
+      "@test:lint",
+      "@test:unit"
+    ]
+  },
+  "config": {
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
+  }
+}
