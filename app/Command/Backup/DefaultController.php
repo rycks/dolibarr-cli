@@ -14,12 +14,13 @@ class DefaultController extends CommandController
 Usage:
  - dolibarr backup --database
  - dolibarr backup --documents
+ - dolibarr backup --modules
  - dolibarr backup --help");
     }
 
     public function handle(): void
     {
-        global $db, $conf, $dolibarr_main_db_pass, $dolibarr_main_data_root;
+        global $db, $conf, $dolibarr_main_db_pass, $dolibarr_main_data_root, $dolibarr_main_document_root;
         $force = false;
         $this->info('Backups');
 
@@ -51,6 +52,18 @@ Usage:
             $this->info('Documents exported in ' . $filename);
             $saveCWD = getcwd();
             chdir($dolibarr_main_data_root);
+            exec($cmd);
+            chdir($saveCWD);
+        }
+
+
+        if ($this->hasFlag('modules')) {
+            //
+            $filename = rtrim($dir, '/') . '/' . $ladate . '-modules.zip';
+            $cmd = "zip " . $filename . " -r .";
+            $this->info('Documents exported in ' . $filename);
+            $saveCWD = getcwd();
+            chdir($dolibarr_main_document_root);
             exec($cmd);
             chdir($saveCWD);
         }
