@@ -39,6 +39,13 @@ if DOLPATH is exported
 ![img 01](doc/img/img-01.png "img")
 
 ```
+./dolibarr user list
+```
+
+![img 01](doc/img/user-list-01.png "img")
+
+
+```
 ./dolibarr user password login=admin
 ```
 
