@@ -39,8 +39,6 @@ class ListController extends CommandController
                         include_once $dir . $file; // A class already exists in a different file will send a non catchable fatal error.
                         if (class_exists($modName)) {
                             $objMod = new $modName($db);
-                            '@phan-var-force DolibarrModules $objMod';
-                            $modNameLoaded[$modName] = $dir;
 
                             $id = $objMod->numero;
                             $name = $objMod->getName();
