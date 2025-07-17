@@ -20,7 +20,7 @@ DOLPATH=/var/www/dolibarr-18.0.7/htdocs/
 Note you could use "export" to set your env var like
 
 ```
-DOLPATH=/var/www/dolibarr-18.0.7/htdocs/
+export DOLPATH=/var/www/dolibarr-18.0.7/htdocs/
 ```
 
 
@@ -30,7 +30,7 @@ DOLPATH=/var/www/dolibarr-18.0.7/htdocs/
 DOLPATH=/var/www/dolibarr-18.0.7/htdocs/ ./dolibarr user
 ```
 
-if DOLPATH is exported
+if env var DOLPATH is exported
 
 ```
 ./dolibarr user
