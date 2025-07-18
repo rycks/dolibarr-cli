@@ -10,12 +10,13 @@ class DefaultController extends CommandController
 {
     public function usage(): void
     {
+        $cmd = implode(" ",$this->getArgs());
         $this->info("All of dolibarr cli for backups
 Usage:
- - dolibarr backup --database
- - dolibarr backup --documents
- - dolibarr backup --modules
- - dolibarr backup --help");
+ - $cmd --database
+ - $cmd --documents
+ - $cmd --modules
+ - $cmd --help");
     }
 
     public function handle(): void
@@ -26,6 +27,7 @@ Usage:
 
         if ($this->hasFlag('help')) {
             $this->usage();
+            return;
         }
 
         $dir = sys_get_temp_dir();

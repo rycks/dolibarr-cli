@@ -13,7 +13,7 @@ class EditController extends CommandController
     public function usage(): void
     {
         $this->info("mandatory args:\n"
-            . " user=login   : choose dolibarr login\n"
+            . " login=dolibarrlogin : choose dolibarr login\n"
             . "options:\n"
             . "  --lock    : lock account (disable)\n"
             . "  --unlock  : unlock account (enable)\n"
@@ -28,6 +28,7 @@ class EditController extends CommandController
 
         if ($this->hasFlag('help')) {
             $this->usage();
+            return;
         }
         if ($this->hasParam('login')) {
             $login = $this->getParam('login');

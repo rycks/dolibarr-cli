@@ -10,10 +10,12 @@ class DefaultController extends CommandController
 {
     public function handle(): void
     {
+        $cmd = implode(" ",$this->getArgs());
+
         $this->info("All of dolibarr cli for user manipulation
 Usage:
- - dolibarr user password --help
- - dolibarr user edit --help
- - dolibarr user list --help");
+ - $cmd password --help
+ - $cmd edit --help
+ - $cmd list --help");
     }
 }

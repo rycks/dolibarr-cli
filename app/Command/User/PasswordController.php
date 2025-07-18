@@ -13,7 +13,7 @@ class PasswordController extends CommandController
     public function usage(): void
     {
         $this->info("mandatory args:\n"
-            . " user=login   : choose dolibarr login\n"
+            . " login=dolibarrlogin : choose dolibarr login\n"
             . " newpass=xxxx : the password, if not set script will ask it as interactive\n\n"
             . "options:\n"
             . "  --help  : display this help\n"
@@ -28,6 +28,7 @@ class PasswordController extends CommandController
 
         if ($this->hasFlag('help')) {
             $this->usage();
+            return;
         }
 
         if ($this->hasFlag('force')) {
