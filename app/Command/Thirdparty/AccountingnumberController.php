@@ -48,14 +48,14 @@ class AccountingnumberController extends CommandController
                     if ($new < 0) {
                         $this->error("Can't get a new accounting code for that thirdpart id=" . $obj->rowid . ", name=" . $soc_static->name);
                         //exit or not on first error ?
-                        exit;
+                        exit();
                     } else {
                         $newcode = $soc_static->code_compta_client;
                         $resupdate = $soc_static->update($obj->rowid, '', 0);
                         if ($resupdate < 0) {
                             $this->error("Can't update that thirdpart id=" . $obj->rowid . ", name=" . $soc_static->name . ", error code is=" . $resupdate);
                             //exit or not on first update error ?
-                            exit;
+                            exit();
                         }
                     }
                     $content[] = [
