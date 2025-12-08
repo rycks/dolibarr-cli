@@ -6,6 +6,7 @@ namespace App\Command\User;
 
 use Minicli\Command\CommandController;
 use Minicli\Input;
+use App\Util\DolibarrHelper;
 
 class AddController extends CommandController
 {
@@ -87,10 +88,12 @@ Examples:
 
         // Create a user object if not exists (required for user creation)
         if (!isset($user) || !is_object($user)) {
-            require_once DOL_DOCUMENT_ROOT . '/user/class/user.class.php';
-            $user = new \User($db);
-            //TODO admin a modifier
-            $user->fetch('', 'admin');
+            $user = DolibarrHelper::getFirstSuperAdminUser();
+            if (!$user) {
+                $this->error("No super admin user found! Cannot create user.");
+                $this->info("Please ensure at least one active super admin exists.");
+                return;
+            }
         }
 
         // Create new user object
