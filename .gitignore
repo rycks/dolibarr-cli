@@ -3,3 +3,4 @@
 .composer/
 vendor/
 composer.lock
+.vscode
