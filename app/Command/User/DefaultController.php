@@ -14,6 +14,9 @@ class DefaultController extends CommandController
 
         $this->info("All of dolibarr cli for user manipulation
 Usage:
+ - $cmd add --help
+ - $cmd show --help
+ - $cmd token --help
  - $cmd password --help
  - $cmd edit --help
  - $cmd list --help");
