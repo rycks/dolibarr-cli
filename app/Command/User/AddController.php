@@ -89,6 +89,7 @@ Examples:
         if (!isset($user) || !is_object($user)) {
             require_once DOL_DOCUMENT_ROOT . '/user/class/user.class.php';
             $user = new \User($db);
+            //TODO admin a modifier
             $user->fetch('', 'admin');
         }
 
