@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command\Repair;
 
 use Minicli\Command\CommandController;
+use App\Util\DolibarrHelper;
 
 class RunController extends CommandController
 {
@@ -105,7 +106,7 @@ Examples:
 
         if (!$wasInMaintenanceMode) {
             // Find first super admin user
-            $maintenanceUser = $this->findFirstSuperAdmin();
+            $maintenanceUser = DolibarrHelper::findFirstSuperAdmin();
             if (!$maintenanceUser) {
                 $this->error("No super admin user found! Cannot enable maintenance mode.");
                 $this->info("Please ensure at least one active super admin exists.");
@@ -170,29 +171,6 @@ Examples:
 
         $this->rawOutput("\n");
         $this->success("Repair action completed");
-    }
-
-    private function findFirstSuperAdmin(): ?string
-    {
-        global $db;
-
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-
-        // Find first active super admin user (admin=1 and statut=1)
-        $sql = "SELECT login FROM " . MAIN_DB_PREFIX . "user";
-        $sql .= " WHERE admin = 1 AND statut = 1";
-        $sql .= " ORDER BY rowid ASC";
-        $sql .= " LIMIT 1";
-
-        $resql = $db->query($sql);
-        if ($resql) {
-            $obj = $db->fetch_object($resql);
-            if ($obj) {
-                return $obj->login;
-            }
-        }
-
-        return null;
     }
 
     public function required(): array
