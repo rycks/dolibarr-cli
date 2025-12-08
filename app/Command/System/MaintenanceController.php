@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command\System;
 
 use Minicli\Command\CommandController;
+use App\Util\DolibarrHelper;
 
 class MaintenanceController extends CommandController
 {
@@ -115,7 +116,7 @@ Do NOT disconnect before disabling maintenance mode or you may be locked out!");
 
         if (!$allowedLogin) {
             // Find first super admin user
-            $allowedLogin = $this->findFirstSuperAdmin();
+            $allowedLogin = DolibarrHelper::findFirstSuperAdmin();
             if ($allowedLogin) {
                 $this->info("No user specified, using first super admin: $allowedLogin");
             } else {
@@ -186,26 +187,8 @@ Do NOT disconnect before disabling maintenance mode or you may be locked out!");
         return ($result > 0);
     }
 
-    private function findFirstSuperAdmin(): ?string
+    public function required(): array
     {
-        global $db;
-
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-
-        // Find first active super admin user (admin=1 and statut=1)
-        $sql = "SELECT login FROM " . MAIN_DB_PREFIX . "user";
-        $sql .= " WHERE admin = 1 AND statut = 1";
-        $sql .= " ORDER BY rowid ASC";
-        $sql .= " LIMIT 1";
-
-        $resql = $db->query($sql);
-        if ($resql) {
-            $obj = $db->fetch_object($resql);
-            if ($obj) {
-                return $obj->login;
-            }
-        }
-
-        return null;
+        return [];
     }
 }
