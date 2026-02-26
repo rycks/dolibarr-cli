@@ -64,6 +64,9 @@ What is NOT anonymized:
             return;
         }
 
+        // Load existing data from the database as source for fake data generation
+        AnonymizeHelper::loadFromDatabase($db);
+
         $summary = AnonymizeHelper::getDryRunSummary($db, $keepAdmin);
 
         if ( ! $this->hasFlag('confirm')) {
