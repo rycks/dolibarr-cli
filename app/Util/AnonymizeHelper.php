@@ -100,6 +100,12 @@ class AnonymizeHelper
         'Informatique', 'Telecom', 'Environnement', 'Energie', 'Partners',
     ];
 
+    // Database-sourced data pools (populated by loadFromDatabase)
+    private static array $dbFirstnames = [];
+    private static array $dbCities = [];
+    private static array $dbZipCodes = [];
+    private static array $dbAddresses = [];
+
     private static array $tablesWithNotes = [
         'adherent', 'asset_model', 'asset', 'bank_account', 'bom_bom',
         'bookcal_availabilities', 'bookcal_booking', 'chargesociales',
@@ -118,6 +124,76 @@ class AnonymizeHelper
         'supplier_proposal', 'user', 'webhook_target',
         'workstation_workstation',
     ];
+
+    private const MIN_POOL_SIZE = 20;
+
+    // --- Database loading ---
+
+    public static function loadFromDatabase(object $db): void
+    {
+        $minEntries = self::MIN_POOL_SIZE;
+
+        $values = self::collectDistinctValues($db, 'firstname', ['socpeople', 'user']);
+        if (count($values) >= $minEntries) {
+            self::$dbFirstnames = $values;
+        }
+
+        // Collect city/zip pairs to keep them consistent
+        $prefix = MAIN_DB_PREFIX;
+        $pairs = [];
+        foreach (['societe', 'socpeople', 'user'] as $table) {
+            if ( ! self::tableExists($db, $table)) {
+                continue;
+            }
+            $sql = "SELECT DISTINCT town, zip FROM ".$prefix.$table
+                ." WHERE town IS NOT NULL AND town != '' AND zip IS NOT NULL AND zip != ''";
+            $resql = $db->query($sql);
+            if ($resql) {
+                while ($obj = $db->fetch_object($resql)) {
+                    $key = $obj->town.'|'.$obj->zip;
+                    $pairs[$key] = [$obj->town, $obj->zip];
+                }
+            }
+        }
+        if (count($pairs) >= $minEntries) {
+            $pairs = array_values($pairs);
+            sort($pairs);
+            self::$dbCities = array_column($pairs, 0);
+            self::$dbZipCodes = array_column($pairs, 1);
+        }
+
+        $values = self::collectDistinctValues($db, 'address', ['societe', 'socpeople']);
+        if (count($values) >= $minEntries) {
+            self::$dbAddresses = $values;
+        }
+    }
+
+    private static function collectDistinctValues(object $db, string $column, array $tables): array
+    {
+        $prefix = MAIN_DB_PREFIX;
+        $parts = [];
+        foreach ($tables as $table) {
+            if (self::tableExists($db, $table)) {
+                $parts[] = "SELECT DISTINCT ".$column." FROM ".$prefix.$table
+                    ." WHERE ".$column." IS NOT NULL AND ".$column." != ''";
+            }
+        }
+
+        if (empty($parts)) {
+            return [];
+        }
+
+        $sql = implode(' UNION ', $parts)." ORDER BY 1";
+        $values = [];
+        $resql = $db->query($sql);
+        if ($resql) {
+            while ($obj = $db->fetch_object($resql)) {
+                $values[] = $obj->$column;
+            }
+        }
+
+        return $values;
+    }
 
     // --- Utility methods ---
 
@@ -148,7 +224,8 @@ class AnonymizeHelper
 
     public static function fakeFirstname(int $id): string
     {
-        return self::pick(self::$firstnames, $id);
+        $pool = ! empty(self::$dbFirstnames) ? self::$dbFirstnames : self::$firstnames;
+        return self::pick($pool, $id);
     }
 
     public static function fakeLastname(int $id): string
@@ -204,18 +281,23 @@ class AnonymizeHelper
 
     public static function fakeAddress(int $id): string
     {
+        if ( ! empty(self::$dbAddresses)) {
+            return self::pick(self::$dbAddresses, $id * 3);
+        }
         $number = ($id % 150) + 1;
         return $number.' '.self::pick(self::$streets, $id * 3);
     }
 
     public static function fakeCity(int $id): string
     {
-        return self::pick(self::$cities, $id * 11);
+        $pool = ! empty(self::$dbCities) ? self::$dbCities : self::$cities;
+        return self::pick($pool, $id * 11);
     }
 
     public static function fakeZip(int $id): string
     {
-        return self::pick(self::$zipCodes, $id * 11);
+        $pool = ! empty(self::$dbZipCodes) ? self::$dbZipCodes : self::$zipCodes;
+        return self::pick($pool, $id * 11);
     }
 
     public static function fakeSiren(int $id): string
