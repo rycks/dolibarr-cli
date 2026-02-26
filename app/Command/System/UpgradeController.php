@@ -157,7 +157,7 @@ WARNING:
         $majorMinor = $matches[1];
         $versions = $this->fetchAvailableVersions();
 
-        $minorVersions = array_filter($versions, function($v) use ($majorMinor) {
+        $minorVersions = array_filter($versions, function ($v) use ($majorMinor) {
             return strpos($v, $majorMinor) === 0;
         });
 
@@ -279,7 +279,6 @@ WARNING:
             $this->success("Upgrade completed successfully!");
             $this->rawOutput("═══════════════════════════════════════════════════════════\n");
             $this->info("Dolibarr has been upgraded from $fromVersion to $toVersion\n");
-
         } catch (\Exception $e) {
             $this->error("\nUpgrade failed: " . $e->getMessage());
             $this->error("Your backup is available at: " . ($backupPath ?? 'not created'));
@@ -444,6 +443,12 @@ WARNING:
     {
         global $db, $conf;
 
+        //erics
+        if (!defined('NOSESSION')) {
+            define('NOSESSION', '1');
+        }
+        chdir(DOL_DOCUMENT_ROOT . '/install/');
+
         $this->rawOutput("\n");
         $this->rawOutput("═══════════════════════════════════════════════════════════\n");
         $this->rawOutput("  DATABASE MIGRATION\n");
@@ -474,10 +479,12 @@ WARNING:
         try {
             $this->rawOutput("Step 1/3: Checking version and preparing migration...\n");
             $this->rawOutput("────────────────────────────────────────────────────────\n");
+            $this->lockUnlock(false);
             $result1 = $this->executeUpgradeStep1();
 
             if (!$result1) {
                 $this->error("\nMigration step 1 failed. Aborting process.");
+                $this->lockUnlock();
                 return;
             }
 
@@ -490,6 +497,7 @@ WARNING:
             if (!$result2) {
                 $this->error("\nMigration step 2 failed. Database may be in inconsistent state!");
                 $this->error("Please check database manually or restore from backup.");
+                $this->lockUnlock();
                 return;
             }
 
@@ -501,6 +509,7 @@ WARNING:
 
             if (!$result3) {
                 $this->error("\nMigration step 3 failed during finalization.");
+                $this->lockUnlock();
                 return;
             }
 
@@ -508,7 +517,7 @@ WARNING:
             $this->rawOutput("═══════════════════════════════════════════════════════════\n");
             $this->success("Database migration completed successfully!");
             $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-
+            $this->lockUnlock();
         } catch (\Exception $e) {
             $this->error("\nException during migration: " . $e->getMessage());
             $this->error("Database may be in inconsistent state. Please restore from backup.");
@@ -570,7 +579,6 @@ WARNING:
             unset($_GET['force']);
 
             return true;
-
         } catch (\Exception $e) {
             ob_end_clean();
             $this->error("Error in step 1: " . $e->getMessage());
@@ -598,7 +606,6 @@ WARNING:
             unset($_GET['selectlang']);
 
             return true;
-
         } catch (\Exception $e) {
             ob_end_clean();
             $this->error("Error in step 2: " . $e->getMessage());
@@ -624,7 +631,6 @@ WARNING:
             unset($_GET['action']);
 
             return true;
-
         } catch (\Exception $e) {
             ob_end_clean();
             $this->error("Error in step 3: " . $e->getMessage());
@@ -635,5 +641,23 @@ WARNING:
     public function required(): array
     {
         return [];
+    }
+
+    /**
+     * put or remove lockfile
+     *
+     * @param   [type]$lock  [$lock description]
+     * @param   true         [ description]
+     *
+     * @return  [type]       [return description]
+     */
+    private function lockUnlock($lock = true)
+    {
+        $lockFile = DOL_DATA_ROOT . "/install.lock";
+        if ($lock) {
+            touch($lockFile);
+        } else {
+            @unlink($lockFile);
+        }
     }
 }
