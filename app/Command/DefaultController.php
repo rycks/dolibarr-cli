@@ -19,7 +19,7 @@ class DefaultController extends CommandController
 
         // Display current Dolibarr version if available
         if (defined('DOL_VERSION')) {
-            $this->info("Dolibarr version: " . DOL_VERSION);
+            $this->info("Dolibarr version: ".DOL_VERSION);
             $this->rawOutput("\n");
         }
 
@@ -52,6 +52,10 @@ class DefaultController extends CommandController
 
         $this->rawOutput("  BACKUP\n");
         $this->rawOutput("   ./dolibarr backup              - Backup operations\n");
+        $this->rawOutput("\n");
+
+        $this->rawOutput("  ANONYMIZE\n");
+        $this->rawOutput("   ./dolibarr anonymize run       - Anonymize all personal data\n");
         $this->rawOutput("\n");
 
         $this->info("Usage:\n");
