@@ -27,10 +27,18 @@ Usage:
   $cmd maintenance enable [login=user]  - Enable maintenance mode
   $cmd maintenance disable              - Disable maintenance mode
   $cmd maintenance status               - Show maintenance status
+
+  $cmd cronkey show                     - Show scheduled jobs security key
+  $cmd cronkey set key=XXXX             - Overwrite CRON_KEY
+  $cmd cronkey generate                 - Generate a random CRON_KEY
+  $cmd cronkey clear                    - Remove CRON_KEY
+
 Examples:
   $cmd upgrade                          - Database migration only
   $cmd upgrade --check                  - Check for upgrades
   $cmd upgrade --minor                  - Full upgrade to latest minor
-  $cmd maintenance status               - Check maintenance mode");
+  $cmd maintenance status               - Check maintenance mode
+  $cmd cronkey show                     - Display current CRON_KEY
+  $cmd cronkey generate                 - Generate a new CRON_KEY");
     }
 }
