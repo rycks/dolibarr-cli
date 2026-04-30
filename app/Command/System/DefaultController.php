@@ -33,12 +33,19 @@ Usage:
   $cmd cronkey generate                 - Generate a random CRON_KEY
   $cmd cronkey clear                    - Remove CRON_KEY
 
+  $cmd filecheck                        - Verify deployment file integrity
+  $cmd filecheck --detect-extra         - Also list files not in signature
+  $cmd filecheck --format=json          - JSON output
+  $cmd filecheck --xmlfile=PATH         - Use a specific signature XML
+  $cmd filecheck --help                 - Show detailed filecheck help
+
 Examples:
   $cmd upgrade                          - Database migration only
   $cmd upgrade --check                  - Check for upgrades
   $cmd upgrade --minor                  - Full upgrade to latest minor
   $cmd maintenance status               - Check maintenance mode
   $cmd cronkey show                     - Display current CRON_KEY
-  $cmd cronkey generate                 - Generate a new CRON_KEY");
+  $cmd cronkey generate                 - Generate a new CRON_KEY
+  $cmd filecheck                        - Check deployment integrity");
     }
 }
