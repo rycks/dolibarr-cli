@@ -13,6 +13,11 @@ class UpgradeController extends CommandController
     private const DOLIBARR_VERSIONS_URL = 'https://www.dolibarr.org/files/stable/standard/';
     private const TEMP_DIR = '/tmp/dolibarr_upgrade';
 
+    // Versions remembered between the file-copy phase and the DB migration phase.
+    // Set by performFullUpgrade, consumed by performDatabaseMigration / executeUpgradeStep*.
+    private ?string $migrationFromVersion = null;
+    private ?string $migrationToVersion = null;
+
     public function usage(): void
     {
         $this->info("Dolibarr Upgrade Manager - Update files and migrate database
@@ -328,6 +333,8 @@ WARNING:
 
             // Step 5: Database migration
             $this->rawOutput("Step 5/6: Running database migration...\n");
+            $this->migrationFromVersion = $fromVersion;
+            $this->migrationToVersion = $toVersion;
             $migrationOk = $this->performDatabaseMigration();
             if (!$migrationOk) {
                 throw new \Exception("Database migration failed");
@@ -657,32 +664,91 @@ WARNING:
         return true;
     }
 
+    /**
+     * Dolibarr's install/inc.php runs CLI-mode argv parsing (getopt, array_slice on $argv).
+     * When we include those scripts from a method, $argv is not in scope, AND the real $argv
+     * still contains dolicli's own flags (--version, --source, --skip-backup, --yes) which
+     * would either break version detection or be flagged as unknown options. So we swap
+     * $argv/$argc with a synthesized one for the duration of the include, then restore.
+     *
+     * @param string $scriptName  The Dolibarr install script being run (basename for argv[0]).
+     * @return array{0:mixed,1:mixed}  Saved [argv, argc] to pass to restoreCliEnv().
+     */
+    private function setupCliEnv(string $scriptName): array
+    {
+        $savedArgv = $GLOBALS['argv'] ?? null;
+        $savedArgc = $GLOBALS['argc'] ?? null;
+
+        $from = $this->migrationFromVersion ?? '';
+        $to = $this->migrationToVersion ?? '';
+
+        $newArgv = [$scriptName];
+        if ($from !== '' && $to !== '') {
+            $newArgv[] = $from;
+            $newArgv[] = $to;
+        }
+
+        $GLOBALS['argv'] = $newArgv;
+        $GLOBALS['argc'] = count($newArgv);
+
+        return [$savedArgv, $savedArgc];
+    }
+
+    private function restoreCliEnv(array $saved): void
+    {
+        [$savedArgv, $savedArgc] = $saved;
+        if ($savedArgv === null) {
+            unset($GLOBALS['argv']);
+        } else {
+            $GLOBALS['argv'] = $savedArgv;
+        }
+        if ($savedArgc === null) {
+            unset($GLOBALS['argc']);
+        } else {
+            $GLOBALS['argc'] = $savedArgc;
+        }
+    }
+
     private function executeUpgradeStep1(): bool
     {
         global $db, $conf;
+
+        $saved = $this->setupCliEnv('upgrade.php');
+        $obStarted = false;
 
         try {
             $_GET['action'] = 'upgrade';
             if ($this->hasFlag('force')) {
                 $_GET['force'] = '1';
             }
+            if ($this->migrationFromVersion) {
+                $_GET['versionfrom'] = $this->migrationFromVersion;
+            }
+            if ($this->migrationToVersion) {
+                $_GET['versionto'] = $this->migrationToVersion;
+            }
 
             ob_start();
+            $obStarted = true;
             include DOL_DOCUMENT_ROOT . '/install/upgrade.php';
             $output = ob_get_clean();
+            $obStarted = false;
 
             $cleanOutput = strip_tags($output);
             $cleanOutput = html_entity_decode($cleanOutput, ENT_QUOTES | ENT_HTML5);
             $this->rawOutput($cleanOutput);
 
-            unset($_GET['action']);
-            unset($_GET['force']);
+            unset($_GET['action'], $_GET['force'], $_GET['versionfrom'], $_GET['versionto']);
 
             return true;
         } catch (\Exception $e) {
-            ob_end_clean();
+            if ($obStarted) {
+                ob_end_clean();
+            }
             $this->error("Error in step 1: " . $e->getMessage());
             return false;
+        } finally {
+            $this->restoreCliEnv($saved);
         }
     }
 
@@ -690,26 +756,40 @@ WARNING:
     {
         global $db, $conf;
 
+        $saved = $this->setupCliEnv('upgrade2.php');
+        $obStarted = false;
+
         try {
             $_GET['action'] = 'upgrade';
             $_GET['selectlang'] = $conf->global->MAIN_LANG_DEFAULT ?? 'en_US';
+            if ($this->migrationFromVersion) {
+                $_GET['versionfrom'] = $this->migrationFromVersion;
+            }
+            if ($this->migrationToVersion) {
+                $_GET['versionto'] = $this->migrationToVersion;
+            }
 
             ob_start();
+            $obStarted = true;
             include DOL_DOCUMENT_ROOT . '/install/upgrade2.php';
             $output = ob_get_clean();
+            $obStarted = false;
 
             $cleanOutput = strip_tags($output);
             $cleanOutput = html_entity_decode($cleanOutput, ENT_QUOTES | ENT_HTML5);
             $this->rawOutput($cleanOutput);
 
-            unset($_GET['action']);
-            unset($_GET['selectlang']);
+            unset($_GET['action'], $_GET['selectlang'], $_GET['versionfrom'], $_GET['versionto']);
 
             return true;
         } catch (\Exception $e) {
-            ob_end_clean();
+            if ($obStarted) {
+                ob_end_clean();
+            }
             $this->error("Error in step 2: " . $e->getMessage());
             return false;
+        } finally {
+            $this->restoreCliEnv($saved);
         }
     }
 
@@ -717,24 +797,39 @@ WARNING:
     {
         global $db, $conf;
 
+        $saved = $this->setupCliEnv('step5.php');
+        $obStarted = false;
+
         try {
             $_GET['action'] = 'set';
+            if ($this->migrationFromVersion) {
+                $_GET['versionfrom'] = $this->migrationFromVersion;
+            }
+            if ($this->migrationToVersion) {
+                $_GET['versionto'] = $this->migrationToVersion;
+            }
 
             ob_start();
+            $obStarted = true;
             include DOL_DOCUMENT_ROOT . '/install/step5.php';
             $output = ob_get_clean();
+            $obStarted = false;
 
             $cleanOutput = strip_tags($output);
             $cleanOutput = html_entity_decode($cleanOutput, ENT_QUOTES | ENT_HTML5);
             $this->rawOutput($cleanOutput);
 
-            unset($_GET['action']);
+            unset($_GET['action'], $_GET['versionfrom'], $_GET['versionto']);
 
             return true;
         } catch (\Exception $e) {
-            ob_end_clean();
+            if ($obStarted) {
+                ob_end_clean();
+            }
             $this->error("Error in step 3: " . $e->getMessage());
             return false;
+        } finally {
+            $this->restoreCliEnv($saved);
         }
     }
 
