@@ -27,8 +27,16 @@ Usage:
 
 Options:
   --force          - Force database upgrade even if versions appear compatible
-  --skip-backup    - Skip database backup prompt (not recommended)
+  --skip-backup    - Skip both file backup and database backup prompt
+  --source=PATH    - Use local directory instead of downloading (skips download + extract).
+                     PATH can point either to a Dolibarr htdocs/ directory or to a
+                     directory containing htdocs/ (auto-detected).
+  --yes            - Non-interactive mode: bypass all confirmation prompts (for batch use)
   --help           - Display this help message
+
+Exit codes:
+  0 - success
+  1 - failure (for shell scripts looping over multiple installations)
 
 Database migration only (when files already updated):
   ./dolibarr system upgrade
@@ -39,6 +47,9 @@ Full upgrade (download + files + database):
   ./dolibarr system upgrade --minor
   ./dolibarr system upgrade --major
   ./dolibarr system upgrade --version=22.0.0
+
+Batch upgrade with local source (no download, no backup, no prompts):
+  ./dolibarr system upgrade --version=18.0.10 --source=/tmp/dolibarr-18.0.10 --skip-backup --yes
 
 WARNING:
 - Always backup your database before upgrading!
@@ -80,12 +91,22 @@ WARNING:
             $targetVersion = $this->getLatestMajorVersion();
         }
 
+        // --source requires --version to be explicit (we cannot infer it from a local directory)
+        if ($this->hasParam('source') && !$this->hasParam('version')) {
+            $this->error("--source requires --version=X.Y.Z to be specified explicitly.");
+            exit(1);
+        }
+
         if ($targetVersion) {
             // Full upgrade: download + files + database
-            $this->performFullUpgrade($targetVersion);
+            $success = $this->performFullUpgrade($targetVersion);
         } else {
             // Database migration only
-            $this->performDatabaseMigration();
+            $success = $this->performDatabaseMigration();
+        }
+
+        if (!$success) {
+            exit(1);
         }
     }
 
@@ -201,11 +222,14 @@ WARNING:
 
     // ==================== FULL UPGRADE ====================
 
-    private function performFullUpgrade(string $toVersion): void
+    private function performFullUpgrade(string $toVersion): bool
     {
         global $conf;
 
         $fromVersion = $this->getCurrentVersion();
+        $useLocalSource = $this->hasParam('source');
+        $skipBackup = $this->hasFlag('skip-backup');
+        $nonInteractive = $this->hasFlag('yes');
 
         $this->rawOutput("\n");
         $this->rawOutput("═══════════════════════════════════════════════════════════\n");
@@ -213,20 +237,36 @@ WARNING:
         $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
 
         $this->info("Current version: $fromVersion");
-        $this->info("Target version:  $toVersion\n");
+        $this->info("Target version:  $toVersion");
+        if ($useLocalSource) {
+            $this->info("Source:          " . $this->getParam('source') . " (local)");
+        }
+        $this->rawOutput("\n");
 
         if (version_compare($toVersion, $fromVersion, '<=')) {
             $this->info("Target version ($toVersion) is not newer than current version ($fromVersion)");
             $this->info("No upgrade needed.");
-            return;
+            return true;
         }
 
-        if (!$this->confirmUpgrade($fromVersion, $toVersion)) {
+        // Resolve and validate local source up-front (fail fast before any destructive op)
+        $resolvedSource = null;
+        if ($useLocalSource) {
+            $resolvedSource = $this->resolveLocalSource($this->getParam('source'));
+            if (!$resolvedSource) {
+                $this->error("Invalid --source path: " . $this->getParam('source'));
+                $this->error("Expected either a Dolibarr htdocs/ directory or a directory containing htdocs/.");
+                return false;
+            }
+            $this->info("Resolved source path: $resolvedSource");
+        }
+
+        if (!$nonInteractive && !$this->confirmUpgrade($fromVersion, $toVersion)) {
             $this->info("Upgrade cancelled by user.");
-            return;
+            return false;
         }
 
-        if (!$this->hasFlag('skip-backup')) {
+        if (!$skipBackup && !$nonInteractive) {
             $this->rawOutput("\n");
             $this->error("IMPORTANT: Have you backed up your database?");
             $this->info("Recommended: mysqldump -u user -p dbname > backup_$(date +%Y%m%d_%H%M%S).sql");
@@ -234,44 +274,71 @@ WARNING:
             fgets(STDIN);
         }
 
+        $backupPath = null;
+        $archivePath = null;
+        $extractPath = null;
+
         try {
             $this->rawOutput("\n");
             $this->info("Starting full upgrade process...\n");
 
-            // Step 1: Download
-            $this->rawOutput("Step 1/6: Downloading Dolibarr $toVersion...\n");
-            $archivePath = $this->downloadVersion($toVersion);
-            if (!$archivePath) {
-                throw new \Exception("Download failed");
+            // Step 1: Download (skipped if --source provided)
+            if ($useLocalSource) {
+                $this->rawOutput("Step 1/6: Skipping download (using local --source)\n");
+            } else {
+                $this->rawOutput("Step 1/6: Downloading Dolibarr $toVersion...\n");
+                $archivePath = $this->downloadVersion($toVersion);
+                if (!$archivePath) {
+                    throw new \Exception("Download failed");
+                }
+                $this->success("Download completed\n");
             }
-            $this->success("Download completed\n");
 
-            // Step 2: Backup
-            $this->rawOutput("Step 2/6: Backing up current installation...\n");
-            $backupPath = $this->backupCurrentInstallation($fromVersion);
-            $this->success("Backup created: $backupPath\n");
-
-            // Step 3: Extract
-            $this->rawOutput("Step 3/6: Extracting archive...\n");
-            $extractPath = $this->extractArchive($archivePath, $toVersion);
-            if (!$extractPath) {
-                throw new \Exception("Extraction failed");
+            // Step 2: Backup (skipped if --skip-backup)
+            if ($skipBackup) {
+                $this->rawOutput("Step 2/6: Skipping file backup (--skip-backup)\n");
+            } else {
+                $this->rawOutput("Step 2/6: Backing up current installation...\n");
+                $backupPath = $this->backupCurrentInstallation($fromVersion);
+                $this->success("Backup created: $backupPath\n");
             }
-            $this->success("Archive extracted\n");
+
+            // Step 3: Extract (skipped if --source provided)
+            if ($useLocalSource) {
+                $this->rawOutput("Step 3/6: Skipping extract (using local --source)\n");
+                $sourcePath = $resolvedSource;
+            } else {
+                $this->rawOutput("Step 3/6: Extracting archive...\n");
+                $extractPath = $this->extractArchive($archivePath, $toVersion);
+                if (!$extractPath) {
+                    throw new \Exception("Extraction failed");
+                }
+                $this->success("Archive extracted\n");
+                $sourcePath = $extractPath . '/htdocs';
+                if (!is_dir($sourcePath)) {
+                    // Fallback for older archives where htdocs/ is the root
+                    $sourcePath = $extractPath;
+                }
+            }
 
             // Step 4: Copy files
             $this->rawOutput("Step 4/6: Copying new files...\n");
-            $this->copyNewFiles($extractPath);
+            $this->copyNewFiles($sourcePath);
             $this->success("Files copied\n");
 
             // Step 5: Database migration
             $this->rawOutput("Step 5/6: Running database migration...\n");
-            $this->performDatabaseMigration();
+            $migrationOk = $this->performDatabaseMigration();
+            if (!$migrationOk) {
+                throw new \Exception("Database migration failed");
+            }
             $this->success("Database migrated\n");
 
-            // Step 6: Cleanup
+            // Step 6: Cleanup (only what we created)
             $this->rawOutput("Step 6/6: Cleaning up temporary files...\n");
-            $this->cleanup($archivePath, $extractPath);
+            if (!$useLocalSource) {
+                $this->cleanup($archivePath, $extractPath);
+            }
             $this->success("Cleanup completed\n");
 
             $this->rawOutput("\n");
@@ -279,11 +346,39 @@ WARNING:
             $this->success("Upgrade completed successfully!");
             $this->rawOutput("═══════════════════════════════════════════════════════════\n");
             $this->info("Dolibarr has been upgraded from $fromVersion to $toVersion\n");
+            return true;
         } catch (\Exception $e) {
             $this->error("\nUpgrade failed: " . $e->getMessage());
             $this->error("Your backup is available at: " . ($backupPath ?? 'not created'));
             $this->info("You may need to restore manually.");
+            return false;
         }
+    }
+
+    /**
+     * Resolve a --source path to the directory that should be rsync'd into DOL_DOCUMENT_ROOT.
+     * Accepts either an htdocs/ directory directly, or a parent that contains htdocs/.
+     *
+     * @return string|null Absolute resolved path, or null if invalid.
+     */
+    private function resolveLocalSource(string $path): ?string
+    {
+        $real = realpath($path);
+        if (!$real || !is_dir($real)) {
+            return null;
+        }
+
+        // Case A: path itself contains main.inc.php -> it IS the htdocs/
+        if (file_exists($real . '/main.inc.php')) {
+            return $real;
+        }
+
+        // Case B: path contains htdocs/main.inc.php -> use the htdocs/ subdir
+        if (file_exists($real . '/htdocs/main.inc.php')) {
+            return $real . '/htdocs';
+        }
+
+        return null;
     }
 
     private function confirmUpgrade(string $from, string $to): bool
@@ -439,9 +534,11 @@ WARNING:
 
     // ==================== DATABASE MIGRATION ====================
 
-    private function performDatabaseMigration(): void
+    private function performDatabaseMigration(): bool
     {
         global $db, $conf;
+
+        $success = false;
 
         //erics
         if (!defined('NOSESSION')) {
@@ -455,7 +552,7 @@ WARNING:
         $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
 
         if (!$this->validateUpgradeFiles()) {
-            return;
+            return false;
         }
 
         require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
@@ -468,7 +565,7 @@ WARNING:
             if (!$maintenanceUser) {
                 $this->error("No super admin user found! Cannot enable maintenance mode.");
                 $this->info("Please ensure at least one active super admin exists.");
-                return;
+                return false;
             }
 
             $this->info("Enabling maintenance mode (user: $maintenanceUser)...\n");
@@ -485,7 +582,7 @@ WARNING:
             if (!$result1) {
                 $this->error("\nMigration step 1 failed. Aborting process.");
                 $this->lockUnlock();
-                return;
+                return false;
             }
 
             $this->rawOutput("\n");
@@ -498,7 +595,7 @@ WARNING:
                 $this->error("\nMigration step 2 failed. Database may be in inconsistent state!");
                 $this->error("Please check database manually or restore from backup.");
                 $this->lockUnlock();
-                return;
+                return false;
             }
 
             $this->rawOutput("\n");
@@ -510,7 +607,7 @@ WARNING:
             if (!$result3) {
                 $this->error("\nMigration step 3 failed during finalization.");
                 $this->lockUnlock();
-                return;
+                return false;
             }
 
             $this->rawOutput("\n");
@@ -518,9 +615,11 @@ WARNING:
             $this->success("Database migration completed successfully!");
             $this->rawOutput("═══════════════════════════════════════════════════════════\n");
             $this->lockUnlock();
+            $success = true;
         } catch (\Exception $e) {
             $this->error("\nException during migration: " . $e->getMessage());
             $this->error("Database may be in inconsistent state. Please restore from backup.");
+            $success = false;
         } finally {
             if (!$wasInMaintenanceMode) {
                 $this->rawOutput("\n");
@@ -531,6 +630,7 @@ WARNING:
         }
 
         $this->rawOutput("\n");
+        return $success;
     }
 
     private function validateUpgradeFiles(): bool
