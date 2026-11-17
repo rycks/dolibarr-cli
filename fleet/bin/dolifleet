@@ -17,4 +17,5 @@ if (PHP_VERSION_ID < 80200) {
 
 require dirname(__DIR__, 2).'/vendor/autoload.php';
 
-exit(Dolifleet\Kernel::application()->run());
+$application = Dolifleet\Kernel::application();
+exit($application->run(Dolifleet\Kernel::input($application, array_values(array_map('strval', $_SERVER['argv'] ?? [])))));

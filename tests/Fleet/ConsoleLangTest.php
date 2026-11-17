@@ -50,13 +50,48 @@ it('knows every key the console asks for', function (): void {
     $used = [];
     foreach ($files as $file) {
         if ($file->isFile() && 'php' === $file->getExtension()) {
-            preg_match_all("/->t\\('([a-z0-9_.-]+)'/", (string) file_get_contents($file->getPathname()), $m);
+            preg_match_all("/->t\\('([a-z0-9_.-]+)'\\s*[,)]/", (string) file_get_contents($file->getPathname()), $m);
             $used = array_merge($used, $m[1]);
         }
     }
     $missing = array_values(array_diff(array_unique($used), array_keys($reference)));
 
     expect($missing)->toBe([]);
+});
+
+it('knows every key built from a name: checks, tabs, states, steps, dolicli commands', function (): void {
+    $reference = include Translator::defaultDirectory().'/en.php';
+    $expected = [];
+    foreach (Dolifleet\Console\Data\Checks::KNOWN as $check) {
+        $expected[] = 'check.'.$check;
+    }
+    foreach (Dolifleet\Console\Screen\InstanceScreen::TABS as $tab) {
+        $expected[] = 'tab.'.$tab;
+    }
+    foreach (['critical', 'failed', 'warning', 'unknown', 'never', 'unreachable', 'paused', 'running', 'pending', 'skipped', 'ok', 'done'] as $state) {
+        $expected[] = 'state.short.'.$state;
+    }
+    foreach (['running', 'done', 'failed', 'paused'] as $state) {
+        $expected[] = 'op.state.'.$state;
+    }
+    foreach (['lease', 'maintenance', 'cron', 'modules-off', 'backup', 'archive', 'deploy', 'switch-files', 'migration', 'finalize', 'verify', 'reopen'] as $step) {
+        $expected[] = 'upgrade.step.'.$step;
+    }
+    foreach (Dolicli\Cli\Registry::commandClasses() as $class) {
+        $expected[] = 'palette.cmd.'.(new $class())->name();
+    }
+    foreach (['problem.cron.failed', 'problem.cron.stale', 'problem.cron.stuck', 'problem.filecheck.modified', 'problem.filecheck.missing', 'problem.filecheck.added',
+        'summary.cron_failed', 'summary.cron_stale', 'summary.cron_stuck', 'fix.b', 'fix.m', 'fix.u', 'sort.gravity', 'sort.name', 'sort.version',
+        'task.running', 'task.done', 'task.failed', 'category.read', 'category.write', 'category.destructive', 'category.pilot',
+        'cron.flag.stuck', 'cron.flag.failed', 'cron.flag.late', 'cron.status.enabled', 'cron.status.disabled', 'cron.status.archived',
+        'cron.result.ok', 'cron.result.failed', 'backup.kind.database', 'backup.kind.documents', 'backup.kind.modules', 'backup.kind.unknown',
+        'journal.phase.result', 'journal.phase.intention', 'value.enabled', 'value.disabled', 'action.maintenance_on', 'action.maintenance_off',
+        'action.maintenance_on.summary', 'action.maintenance_off.summary', 'key.all_modules', 'key.external_modules', 'add.with_sudo',
+        'add.without_sudo', 'op.finished_ok', 'op.finished_failed'] as $key) {
+        $expected[] = $key;
+    }
+
+    expect(array_values(array_diff($expected, array_keys($reference))))->toBe([]);
 });
 
 it('chooses the language from the option, the environment, the settings, then the locale', function (): void {
