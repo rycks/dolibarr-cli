@@ -240,6 +240,7 @@ return [
     'problem.tls' => 'le certificat TLS expire dans %s',
     'problem.operation' => 'une opération est en cours',
     'problem.generic' => '%s à vérifier',
+    'problem.unknown' => '%s : non mesuré',
 
     'action.maintenance_on' => 'Maintenance activée',
     'action.maintenance_off' => 'Maintenance désactivée',

@@ -278,7 +278,8 @@ final class InstanceScreen extends Screen implements TargetAware
         $fields[] = [$t->t('summary.cron'), Line::of([] === $cron ? $t->t('summary.cron_ok') : implode(', ', $cron), [] === $cron ? '' : 'warn'), '4'];
         $backup = $row->backupAge();
         $backupStatus = (string) ($row->checks['backup.age']['status'] ?? 'ok');
-        $fields[] = [$t->t('summary.backups'), Line::of(null === $backup ? $t->t('summary.backup_none') : $t->t('summary.backup_value', $t->duration($backup)), Signs::style($backupStatus)), '5'];
+        $measured = isset($row->checks['backup.age']);
+        $fields[] = [$t->t('summary.backups'), Line::of( ! $measured ? '-' : (null === $backup ? $t->t('summary.backup_none') : $t->t('summary.backup_value', $t->duration($backup))), $measured ? Signs::style($backupStatus) : ''), '5'];
         $maintenance = $row->maintenance();
         $fields[] = [$t->t('summary.maintenance'), Line::of(null === $maintenance ? '-' : ($maintenance ? 'ON' : 'off'), true === $maintenance ? 'warn' : ''), 'm'];
         $disk = [];

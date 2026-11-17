@@ -96,7 +96,10 @@ final class Table
                     $content = max($content, $row[$column['key']]->width());
                 }
             }
-            $column['width'] = max($column['min'], min($column['max'], $content));
+            // The flexible column starts at its minimum and takes the width left at the end: a
+            // long text there must never push the other columns out.
+            $column['width'] = $column['flex'] ? $column['min'] : max($column['min'], min($column['max'], $content));
+            $column['content'] = $content;
             $columns[] = $column;
         }
         $total = static fn (array $columns): int => array_sum(array_column($columns, 'width')) + max(0, count($columns) - 1) * 2;

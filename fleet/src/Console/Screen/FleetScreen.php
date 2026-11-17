@@ -257,7 +257,7 @@ final class FleetScreen extends Screen implements TargetAware
             ->column('state', $app->t->t('col.state'), 9, $app->t->widest('state.short.unreachable') + 3, 0)
             ->column('backup', $app->t->t('col.backup'), 6, 9, 4)
             ->column('maintenance', $app->t->t('col.maintenance'), 5, 6, 6)
-            ->column('problem', $app->t->t('col.problem'), 10, 200, 2, 'left', true);
+            ->column('problem', $app->t->t('col.problem'), 28, 200, 2, 'left', true);
         foreach ($entries as $entry) {
             if ('row' === $entry['type']) {
                 $table->row($this->cells($app, $entry['row']));

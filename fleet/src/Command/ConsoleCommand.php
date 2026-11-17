@@ -124,7 +124,7 @@ final class ConsoleCommand extends FleetCommand
             ->column('backup', $t->t('col.backup'), 6, 9, 4)
             ->column('maintenance', $t->t('col.maintenance'), 5, 6, 5)
             ->column('age', $t->t('col.age'), 6, 16, 2)
-            ->column('problem', $t->t('col.problem'), 10, 200, 1, 'left', true);
+            ->column('problem', $t->t('col.problem'), 28, 200, 1, 'left', true);
         foreach ($rows as $row) {
             $backup = $row->backupAge();
             $maintenance = $row->maintenance();

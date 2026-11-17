@@ -471,3 +471,21 @@ it('opens the console on a real terminal and gives the terminal back clean on q'
         ->and($result['out'])->toContain('dev1')
         ->and($result['out'])->toContain("\e[?1049l");
 })->skip( ! is_executable('/usr/bin/script'), 'script (util-linux) is needed for a pseudo-terminal');
+
+it('keeps every column when the flexible one holds a long text, and drops the least useful first when narrow', function (): void {
+    $table = (new Dolifleet\Console\View\Table())
+        ->column('instance', 'instance', 8, 20, 0)
+        ->column('version', 'version', 7, 10, 3)
+        ->column('state', 'state', 6, 10, 0)
+        ->column('problem', 'to look at', 10, 200, 2, 'left', true)
+        ->row(['instance' => 'client-b-prod', 'version' => '20.0.1', 'state' => '? unknown', 'problem' => str_repeat('unreachable: SSH_FAILED connect timed out ', 5)]);
+    $wide = Renderer::plain($table->render(100, 5), 100);
+    $narrow = Renderer::plain($table->render(40, 5), 40);
+
+    expect($wide[0])->toContain('version')
+        ->and($wide[0])->toContain('to look at')
+        ->and($wide[1])->toContain('20.0.1')
+        ->and(mb_strwidth($wide[1]))->toBeLessThanOrEqual(100)
+        ->and($narrow[0])->not->toContain('version')
+        ->and($narrow[0])->toContain('state');
+});

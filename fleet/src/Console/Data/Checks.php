@@ -51,7 +51,9 @@ final class Checks
             if (self::gravity($status) < 1) {
                 continue;
             }
-            $problems[] = new Problem((string) $name, $status, $this->text((string) $name, $check), $this->fix((string) $name), (string) ($check['message'] ?? ''));
+            // An unknown check was not measured: it says so, it never claims a violation.
+            $text = 'unknown' === $status ? $this->t->t('problem.unknown', $this->label((string) $name)) : $this->text((string) $name, $check);
+            $problems[] = new Problem((string) $name, $status, $text, $this->fix((string) $name), (string) ($check['message'] ?? ''));
         }
         usort($problems, static fn (Problem $a, Problem $b): int => [self::gravity($b->status), $a->check] <=> [self::gravity($a->status), $b->check]);
 
