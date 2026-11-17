@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Util\InstallLock;
+use Dolicli\Upgrade\InstallLock;
 
 function fakeInstall(bool $knowsUnlock, bool $locked): array
 {

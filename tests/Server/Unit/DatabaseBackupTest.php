@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Util\DatabaseBackup;
+use Dolicli\Dolibarr\Backup as DatabaseBackup;
 
 beforeEach(function (): void {
     $this->bin = DOLICLI_TEST_TMP.'/bin-'.bin2hex(random_bytes(4));
@@ -54,8 +54,8 @@ it('reports a failing dump and removes the partial file', function (): void {
     $ok = $backup->dumpDatabase($target);
 
     expect($ok)->toBeFalse()
-        ->and($backup->getLastError())->toContain('exit code 2')
-        ->and($backup->getLastError())->toContain('Access denied')
+        ->and($backup->lastError())->toContain('exit code 2')
+        ->and($backup->lastError())->toContain('Access denied')
         ->and(file_exists($target))->toBeFalse();
 });
 
@@ -79,6 +79,6 @@ it('refuses an unknown database type', function (): void {
     $backup = new DatabaseBackup();
 
     expect($backup->dumpDatabase($target))->toBeFalse()
-        ->and($backup->getLastError())->toContain("'oracle' is not supported")
+        ->and($backup->lastError())->toContain("'oracle' is not supported")
         ->and(file_exists($target))->toBeFalse();
 });

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Util\Anonymizer;
+use Dolicli\Anonymize\Anonymizer;
 
 it('builds ASCII logins and emails from accented fake names', function (): void {
     foreach (range(1, 300) as $id) {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Util\MigrationPlanner;
+use Dolicli\Upgrade\MigrationPlanner;
 
 $files = ['16.0.0-17.0.0.sql', '17.0.0-18.0.0.sql', '18.0.0-19.0.0.sql', '19.0.0-20.0.0.sql', '20.0.0-21.0.0.sql', 'repair.sql'];
 

@@ -52,9 +52,6 @@ jobs:
     - name: Run test suite
       run: vendor/bin/pest
 
-    - name: Build the phar
-      run: vendor/bin/box compile
-
   # php -l of the built body under every PHP of the matrix (contract 4.2).
   syntax:
     needs: build

@@ -68,6 +68,7 @@ final class Registry
             \Dolicli\Command\System\FilecheckCommand::class,
             \Dolicli\Command\BackupCommand::class,
             \Dolicli\Command\Repair\RunCommand::class,
+            \Dolicli\Command\Anonymize\RunCommand::class,
             \Dolicli\Command\System\UpgradeCommand::class,
             \Dolicli\Command\Upgrade\StatusCommand::class,
             \Dolicli\Command\Upgrade\DeployCommand::class,

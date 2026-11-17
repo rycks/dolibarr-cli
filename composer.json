@@ -1,6 +1,6 @@
 {
   "name": "rycks/dolibarr-cli",
-  "description": "Dolibarr administration from the command line",
+  "description": "dolicli: Dolibarr administration from the command line (server body, PHP 7.0+)",
   "license": "AGPL-3.0-or-later",
   "homepage": "https://github.com/rycks/dolibarr-cli",
   "keywords": [
@@ -9,11 +9,6 @@
     "dolibarr",
     "erp"
   ],
-  "autoload": {
-    "psr-4": {
-      "App\\": "app/"
-    }
-  },
   "autoload-dev": {
     "psr-4": {
       "Dolicli\\": "server/src/"
@@ -23,17 +18,15 @@
     ]
   },
   "bin": [
-    "dolibarr"
+    "dolibarr",
+    "dolicli"
   ],
   "require": {
-    "php": ">=8.2",
-    "minicli/minicli": "^4.2",
-    "symfony/polyfill-mbstring": "^1.31"
+    "php": ">=8.2"
   },
   "require-dev": {
     "pestphp/pest": "^3.8",
     "laravel/pint": "^1.30",
-    "humbug/box": "^4.7",
     "phpstan/phpstan": "^2.1",
     "cap-rel/dolibarr-integration-sqlite": "18.0.x-dev",
     "squizlabs/php_codesniffer": "^3.13",
@@ -42,24 +35,9 @@
     "opis/json-schema": "^2.4"
   },
   "scripts": {
-    "build": "box compile",
-    "lint": [
-      "pint"
-    ],
-    "test:lint": [
-      "@php -l dolibarr",
-      "pint --test"
-    ],
-    "test:unit": [
-      "pest"
-    ],
-    "test": [
-      "@test:lint",
-      "@test:unit"
-    ],
-    "phpstan": [
-      "phpstan analyse --memory-limit=1G"
-    ]
+    "build": "php build/build-server.php",
+    "test": "pest",
+    "phpstan": "phpstan analyse --memory-limit=1G"
   },
   "config": {
     "allow-plugins": {

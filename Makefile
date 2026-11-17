@@ -8,7 +8,7 @@ TMP          = /tmp/$(USER)/$(MODULE)
 # PHP binaries of the compatibility matrix present on this machine (syntax check of the body).
 PHP_MATRIX   ?= $(foreach v,7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4 8.5,$(wildcard /usr/bin/php$(v)))
 
-.PHONY: help deploy-doc screenshots build test lint lint-server phpstan phpstan-all phar
+.PHONY: help deploy-doc screenshots build test lint lint-server phpstan phpstan-all
 
 help:
 	@echo ''
@@ -20,7 +20,6 @@ help:
 	@echo '  lint-server   -  php -l of the built body under every PHP of the matrix, PHP 7.0 compatibility'
 	@echo '  phpstan       -  static analysis (needs .phpstan.local.neon, DOLIBARR_VERSION=18 by default)'
 	@echo '  phpstan-all   -  server analysis against every Dolibarr from 10 to 24'
-	@echo '  phar          -  build dolicli.phar with box (v1)'
 	@echo '  deploy-doc    -  publish user documentation to $(DOC_HOST)'
 	@echo '  screenshots   -  collect missing screenshots interactively'
 	@echo ''
@@ -32,7 +31,7 @@ test: build
 	vendor/bin/pest
 
 lint: lint-server
-	@for f in dolibarr $$(git ls-files 'app/*.php' 'config/*.php' 'tests/*.php' 'build/*.php'); do php -l $$f > /dev/null || exit 1; done
+	@for f in $$(git ls-files 'tests/*.php' 'build/*.php'); do php -l $$f > /dev/null || exit 1; done
 	vendor/bin/pint --test
 
 lint-server: build
@@ -46,7 +45,7 @@ phpstan:
 		exit 1; \
 	}
 	@mkdir -p $(TMP)
-	@for cfg in .phpstan.dist.neon .phpstan.tools.dist.neon .phpstan.v1.dist.neon; do \
+	@for cfg in .phpstan.dist.neon .phpstan.tools.dist.neon; do \
 		printf 'includes:\n\t- %s\n\t- %s\n' "$(CURDIR)/$$cfg" "$(CURDIR)/$(PHPSTAN_LOCAL)" > $(TMP)/$$cfg; \
 		echo "phpstan $$cfg"; \
 		TMPDIR=$(TMP) DOLIBARR_VERSION=$${DOLIBARR_VERSION:-18} php $(PHPSTAN) analyse -c $(TMP)/$$cfg --memory-limit=1G --no-progress || exit 1; \
@@ -58,9 +57,6 @@ phpstan-all:
 		echo "Dolibarr $$v"; \
 		TMPDIR=$(TMP) DOLIBARR_VERSION=$$v php $(PHPSTAN) analyse -c $(TMP)/phpstan-server.neon --memory-limit=1G --no-progress --error-format=raw || exit 1; \
 	done
-
-phar:
-	vendor/bin/box compile
 
 deploy-doc:
 	rsync -avLP docs/users/ $(DOC_HOST):$(DOC_PATH)/

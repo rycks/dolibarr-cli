@@ -18,30 +18,28 @@ function seedPersonalData(): void
         VALUES (9005, 1, 'BILL_VALIDATE', 10, 'sig', 'sigline', 'facture', 1, 'FA1', 'data', 'John Doe', 1, '2026-01-01 00:00:00', 0)");
 }
 
-it('only shows what would change in dry run', function (): void {
+it('only counts what would change without --confirm', function (): void {
     seedPersonalData();
 
-    $result = dolicli(['anonymize', 'run']);
+    $result = serverJson(['anonymize', 'run']);
+    $text = server(['anonymize', 'run', '--format=text']);
 
     expect($result['code'])->toBe(0)
-        ->and($result['out'])->toContain('DRY RUN')
-        ->and($result['out'])->toContain('--confirm --this-is-a-copy')
+        ->and($result['json']['data']['executed'])->toBeFalse()
+        ->and($result['json']['data']['rows']['thirdparties'])->toBe(1)
+        ->and($text['out'])->toContain('--confirm --this-is-a-copy')
         ->and(dbValue('SELECT nom FROM llx_societe WHERE rowid = 9001'))->toBe('Real Company SARL');
 });
 
-it('refuses to run without --this-is-a-copy', function (): void {
-    $result = dolicli(['anonymize', 'run', '--confirm'], "YES\n");
-
-    expect($result['code'])->toBe(1)
-        ->and($result['out'])->toContain('--this-is-a-copy');
-});
-
-it('aborts without YES on standard input', function (): void {
+it('refuses to run without --this-is-a-copy, and without confirmation', function (): void {
     seedPersonalData();
 
-    $result = dolicli(['anonymize', 'run', '--confirm', '--this-is-a-copy'], '');
+    $notCopy = serverJson(['anonymize', 'run', '--confirm', '--yes']);
+    $noTerminal = serverJson(['anonymize', 'run', '--confirm', '--this-is-a-copy']);
 
-    expect($result['out'])->toContain('Aborted.')
+    expect($notCopy['code'])->toBe(2)
+        ->and($notCopy['json']['errors'][0]['code'])->toBe('NOT_A_COPY')
+        ->and($noTerminal['code'])->toBe(4)
         ->and(dbValue('SELECT nom FROM llx_societe WHERE rowid = 9001'))->toBe('Real Company SARL');
 });
 
@@ -49,10 +47,11 @@ it('anonymizes personal data and keeps the admin', function (): void {
     seedPersonalData();
     $adminBefore = testDb()->query("SELECT lastname, email, pass_crypted FROM llx_user WHERE login = 'admin'")->fetch(PDO::FETCH_ASSOC);
 
-    $result = dolicli(['anonymize', 'run', '--confirm', '--this-is-a-copy'], "YES\n");
+    $result = serverJson(['anonymize', 'run', '--confirm', '--this-is-a-copy', '--yes']);
 
     expect($result['code'])->toBe(0)
-        ->and($result['out'])->toContain('Anonymization completed.');
+        ->and($result['json']['data']['executed'])->toBeTrue()
+        ->and($result['json']['acting_user'])->toBe('admin');
 
     $dump = '';
     foreach (['llx_societe', 'llx_socpeople', 'llx_user', 'llx_societe_rib', 'llx_const'] as $table) {
@@ -76,10 +75,11 @@ it('rolls everything back when a statement fails', function (): void {
     seedPersonalData();
     testDb()->exec("CREATE TRIGGER fail_contacts BEFORE UPDATE ON llx_socpeople BEGIN SELECT RAISE(ABORT, 'forced failure'); END");
 
-    $result = dolicli(['anonymize', 'run', '--confirm', '--this-is-a-copy'], "YES\n");
+    $result = serverJson(['anonymize', 'run', '--confirm', '--this-is-a-copy', '--yes']);
 
     expect($result['code'])->toBe(1)
-        ->and($result['out'])->toContain('every change was rolled back')
+        ->and($result['json']['errors'][0]['code'])->toBe('ANONYMIZATION_FAILED')
+        ->and($result['json']['errors'][0]['message'])->toContain('every change was rolled back')
         ->and(dbValue('SELECT nom FROM llx_societe WHERE rowid = 9001'))->toBe('Real Company SARL')
         ->and(dbValue("SELECT COUNT(*) FROM llx_const WHERE name = 'MAIN_ONLY_LOGIN_ALLOWED'"))->toBe(0);
 });

@@ -1,10 +1,9 @@
 <?php
 
-declare(strict_types=1);
+namespace Dolicli\Anonymize;
 
-namespace App\Util;
-
-use RuntimeException;
+use Dolicli\Cli\Failure;
+use Dolicli\System\Log;
 
 /**
  * Replace the personal data of a Dolibarr database with fake values.
@@ -19,7 +18,7 @@ use RuntimeException;
  */
 final class Anonymizer
 {
-    private const FIRSTNAMES = [
+    const FIRSTNAMES = [
         'Jean', 'Marie', 'Pierre', 'Sophie', 'François', 'Isabelle', 'Michel', 'Catherine',
         'Philippe', 'Nathalie', 'Jacques', 'Christine', 'Patrick', 'Sylvie', 'Laurent',
         'Véronique', 'Didier', 'Martine', 'Alain', 'Monique', 'Claude', 'Brigitte',
@@ -34,7 +33,7 @@ final class Anonymizer
         'Xavier', 'Louise', 'Yves', 'Juliette', 'Henri', 'Gabrielle', 'Louis',
     ];
 
-    private const LASTNAMES = [
+    const LASTNAMES = [
         'Martin', 'Bernard', 'Thomas', 'Petit', 'Robert', 'Richard', 'Durand', 'Dubois',
         'Moreau', 'Laurent', 'Simon', 'Michel', 'Lefebvre', 'Leroy', 'Roux', 'David',
         'Bertrand', 'Morel', 'Fournier', 'Girard', 'Bonnet', 'Dupont', 'Lambert',
@@ -47,7 +46,7 @@ final class Anonymizer
     ];
 
     /** City and zip code at the same index belong together. */
-    private const CITIES = [
+    const CITIES = [
         ['Paris', '75001'], ['Lyon', '69001'], ['Marseille', '13001'], ['Toulouse', '31000'],
         ['Nice', '06000'], ['Nantes', '44000'], ['Strasbourg', '67000'], ['Montpellier', '34000'],
         ['Bordeaux', '33000'], ['Lille', '59000'], ['Rennes', '35000'], ['Reims', '51100'],
@@ -63,7 +62,7 @@ final class Anonymizer
         ['Laval', '53000'], ['Belfort', '90000'], ['Épinal', '88000'], ['Blois', '41000'],
     ];
 
-    private const STREETS = [
+    const STREETS = [
         'Rue de la Paix', 'Avenue des Champs', 'Boulevard Saint-Germain', 'Rue du Commerce',
         'Avenue Victor Hugo', 'Rue de la République', 'Boulevard Haussmann', 'Rue du Faubourg',
         'Avenue Jean Jaures', 'Rue Pasteur', 'Boulevard Voltaire', 'Rue de Rivoli',
@@ -74,7 +73,7 @@ final class Anonymizer
         'Rue de la Mairie', 'Rue du Pont', 'Rue des Vignes', 'Boulevard du Midi',
     ];
 
-    private const COMPANY_PREFIXES = [
+    const COMPANY_PREFIXES = [
         'Acme', 'Nexus', 'Vertex', 'Prism', 'Atlas', 'Zenith', 'Apex', 'Nova',
         'Quantum', 'Helix', 'Orion', 'Sigma', 'Vega', 'Titan', 'Echo',
         'Delta', 'Omega', 'Alpha', 'Phoenix', 'Stellar', 'Cobalt', 'Synergie',
@@ -82,34 +81,42 @@ final class Anonymizer
         'Opale', 'Rubis', 'Topaze', 'Jade', 'Onyx', 'Azur', 'Céleste',
     ];
 
-    private const COMPANY_SUFFIXES = [
+    const COMPANY_SUFFIXES = [
         'Solutions', 'Industries', 'Technologies', 'Services', 'Conseil',
         'Consulting', 'International', 'Group', 'Systems', 'Digital',
         'France', 'Europe', 'Logistique', 'Distribution', 'Ingénierie',
     ];
 
     /** Constants holding secrets (passwords, API keys, tokens): emptied. */
-    private const SECRET_CONST_PATTERN = '/(PASS|PASSWORD|_PW|_PW_.*|SECRET|_KEY|APIKEY|API_KEY|TOKEN|_SMTPS_ID.*)$/';
+    const SECRET_CONST_PATTERN = '/(PASS|PASSWORD|_PW|_PW_.*|SECRET|_KEY|APIKEY|API_KEY|TOKEN|_SMTPS_ID.*)$/';
 
     /** Company identity constants kept as is (codes, not personal data). */
-    private const KEPT_COMPANY_CONSTS = [
+    const KEPT_COMPANY_CONSTS = [
         'MAIN_INFO_SOCIETE_COUNTRY', 'MAIN_INFO_SOCIETE_STATE', 'MAIN_INFO_SOCIETE_FORME_JURIDIQUE',
         'MAIN_INFO_SOCIETE_MONNAIE', 'MAIN_INFO_SOCIETE_FISCAL_MONTH_START',
     ];
 
     /** Extrafield types that can hold free text. */
-    private const TEXT_EXTRAFIELD_TYPES = ['varchar', 'text', 'html', 'mail', 'phone', 'url', 'password', 'ip'];
+    const TEXT_EXTRAFIELD_TYPES = ['varchar', 'text', 'html', 'mail', 'phone', 'url', 'password', 'ip'];
 
-    private string $dbType;
+    /** @var \DoliDB */
+    private $db;
+
+    /** @var string */
+    private $dbType;
 
     /** @var array<string, array<int, string>> */
-    private array $columnsCache = [];
+    private $columnsCache = [];
 
     /** @var array<int, string>|null */
-    private ?array $tablesCache = null;
+    private $tablesCache;
 
-    public function __construct(private readonly object $db)
+    /**
+     * @param \DoliDB $db
+     */
+    public function __construct($db)
     {
+        $this->db = $db;
         $this->dbType = (string) $db->type;
     }
 
@@ -117,8 +124,9 @@ final class Anonymizer
 
     /**
      * @param  array<int, mixed>  $list
+     * @return mixed
      */
-    public static function pick(array $list, int $seed): mixed
+    public static function pick(array $list, int $seed)
     {
         return $list[abs($seed) % count($list)];
     }
@@ -135,21 +143,21 @@ final class Anonymizer
 
     public static function fakeCompanyName(int $id): string
     {
-        return self::pick(self::COMPANY_PREFIXES, $id).' '.self::pick(self::COMPANY_SUFFIXES, $id * 3 + 1);
+        return self::pick(self::COMPANY_PREFIXES, $id) . ' ' . self::pick(self::COMPANY_SUFFIXES, $id * 3 + 1);
     }
 
     public static function fakeEmail(int $id, string $kind = 'person'): string
     {
         if ('company' === $kind) {
-            return 'contact'.$id.'@'.self::ascii((string) self::pick(self::COMPANY_PREFIXES, $id)).'.example.com';
+            return 'contact' . $id . '@' . self::ascii((string) self::pick(self::COMPANY_PREFIXES, $id)) . '.example.com';
         }
 
-        return self::fakeLogin($id).'@example.com';
+        return self::fakeLogin($id) . '@example.com';
     }
 
     public static function fakeLogin(int $id): string
     {
-        return self::ascii(self::fakeFirstname($id).'.'.self::fakeLastname($id)).$id;
+        return self::ascii(self::fakeFirstname($id) . '.' . self::fakeLastname($id)) . $id;
     }
 
     /**
@@ -157,17 +165,19 @@ final class Anonymizer
      */
     public static function ascii(string $text): string
     {
+        // strtr() before strtolower(): no mbstring needed for the accented letters of the lists.
         $map = [
             'à' => 'a', 'â' => 'a', 'ä' => 'a', 'ç' => 'c', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
             'î' => 'i', 'ï' => 'i', 'ô' => 'o', 'ö' => 'o', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+            'À' => 'a', 'Â' => 'a', 'Ç' => 'c', 'É' => 'e', 'È' => 'e', 'Ê' => 'e', 'Î' => 'i', 'Ô' => 'o', 'Û' => 'u',
         ];
 
-        return (string) preg_replace('/[^a-z0-9.\-]/', '', strtr(mb_strtolower($text), $map));
+        return (string) preg_replace('/[^a-z0-9.\-]/', '', strtolower(strtr($text, $map)));
     }
 
     public static function fakePhone(int $id, bool $mobile = false): string
     {
-        $n = abs(crc32(($mobile ? 'mobile' : 'phone').$id));
+        $n = abs(crc32(($mobile ? 'mobile' : 'phone') . $id));
         $prefix = $mobile ? (0 === $id % 2 ? 6 : 7) : ($id % 5) + 1;
 
         return sprintf('0%d %02d %02d %02d %02d', $prefix, $n % 100, ($n >> 8) % 100, ($n >> 16) % 100, ($n >> 24) % 100);
@@ -175,7 +185,7 @@ final class Anonymizer
 
     public static function fakeAddress(int $id): string
     {
-        return (($id % 150) + 1).' '.self::pick(self::STREETS, $id * 3);
+        return (($id % 150) + 1) . ' ' . self::pick(self::STREETS, $id * 3);
     }
 
     public static function fakeTown(int $id): string
@@ -195,7 +205,7 @@ final class Anonymizer
 
     public static function fakeIban(int $id): string
     {
-        $n = abs(crc32('iban'.$id));
+        $n = abs(crc32('iban' . $id));
 
         return sprintf('FR76%05d%05d%011d%02d', $n % 100000, ($n >> 10) % 100000, abs($id) % 100000000000, abs($id) % 100);
     }
@@ -211,23 +221,33 @@ final class Anonymizer
             return $this->tablesCache;
         }
 
-        $sql = match ($this->dbType) {
-            'mysql', 'mysqli' => 'SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()',
-            'pgsql' => 'SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()',
-            'sqlite3' => "SELECT name FROM sqlite_master WHERE type = 'table'",
-            default => throw new RuntimeException("Database type '{$this->dbType}' is not supported for anonymization."),
-        };
+        switch ($this->dbType) {
+            case 'mysql':
+            case 'mysqli':
+                $sql = 'SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()';
+                break;
+            case 'pgsql':
+                $sql = 'SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()';
+                break;
+            case 'sqlite3':
+                $sql = "SELECT name FROM sqlite_master WHERE type = 'table'";
+                break;
+            default:
+                throw Failure::operation('DATABASE_NOT_SUPPORTED', "Database type '{$this->dbType}' is not supported for anonymization.");
+        }
 
         $tables = [];
         foreach ($this->select($sql) as $row) {
-            $name = (string) ($row->name ?? $row->NAME ?? '');
-            if (str_starts_with($name, MAIN_DB_PREFIX)) {
-                $tables[] = mb_substr($name, mb_strlen(MAIN_DB_PREFIX));
+            $name = self::field($row, 'name');
+            if (0 === strpos($name, MAIN_DB_PREFIX)) {
+                $tables[] = substr($name, strlen(MAIN_DB_PREFIX));
             }
         }
         sort($tables);
 
-        return $this->tablesCache = $tables;
+        $this->tablesCache = $tables;
+
+        return $tables;
     }
 
     public function tableExists(string $table): bool
@@ -243,40 +263,46 @@ final class Anonymizer
         if (isset($this->columnsCache[$table])) {
             return $this->columnsCache[$table];
         }
-        if ( ! $this->tableExists($table)) {
-            return $this->columnsCache[$table] = [];
+        if (!$this->tableExists($table)) {
+            $this->columnsCache[$table] = [];
+
+            return [];
         }
 
-        $name = MAIN_DB_PREFIX.$table;
-        $sql = match ($this->dbType) {
-            'mysql', 'mysqli' => "SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '".$this->db->escape($name)."'",
-            'pgsql' => "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '".$this->db->escape($name)."'",
-            default => 'PRAGMA table_info('.preg_replace('/[^a-z0-9_]/i', '', $name).')',
-        };
+        $name = MAIN_DB_PREFIX . $table;
+        if (in_array($this->dbType, ['mysql', 'mysqli'], true)) {
+            $sql = "SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . $this->db->escape($name) . "'";
+        } elseif ('pgsql' === $this->dbType) {
+            $sql = "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '" . $this->db->escape($name) . "'";
+        } else {
+            $sql = 'PRAGMA table_info(' . preg_replace('/[^a-z0-9_]/i', '', $name) . ')';
+        }
 
         $columns = [];
         foreach ($this->select($sql) as $row) {
-            $columns[] = mb_strtolower((string) ($row->name ?? $row->NAME ?? ''));
+            $columns[] = strtolower(self::field($row, 'name'));
         }
+        $this->columnsCache[$table] = $columns;
 
-        return $this->columnsCache[$table] = $columns;
+        return $columns;
     }
 
     public function countRows(string $table, string $where = '1 = 1'): int
     {
-        if ( ! $this->tableExists($table)) {
+        if (! $this->tableExists($table)) {
             return 0;
         }
-        $rows = $this->select('SELECT COUNT(*) AS cnt FROM '.MAIN_DB_PREFIX.$table.' WHERE '.$where);
+        $rows = $this->select('SELECT COUNT(*) AS cnt FROM ' . MAIN_DB_PREFIX . $table . ' WHERE ' . $where);
 
-        return (int) ($rows[0]->cnt ?? 0);
+        return isset($rows[0]) ? (int) self::field($rows[0], 'cnt') : 0;
     }
 
     // ==================== ANONYMIZATION ====================
 
     public function anonymizeThirdparties(): int
     {
-        return $this->perRow('societe', static fn (int $id): array => [
+        return $this->perRow('societe', function ($id) {
+            return [
             'nom' => self::fakeCompanyName($id),
             'name_alias' => '',
             'address' => self::fakeAddress($id),
@@ -290,20 +316,22 @@ final class Anonymizer
             'skype' => '',
             'socialnetworks' => null,
             'siren' => self::fakeSiren($id),
-            'siret' => self::fakeSiren($id).sprintf('%05d', ($id * 31) % 100000),
-            'ape' => sprintf('%04d', ($id * 17) % 10000).chr(65 + ($id % 26)),
+            'siret' => self::fakeSiren($id) . sprintf('%05d', ($id * 31) % 100000),
+            'ape' => sprintf('%04d', ($id * 17) % 10000) . chr(65 + ($id % 26)),
             'idprof4' => '', 'idprof5' => '', 'idprof6' => '',
-            'tva_intra' => 'FR'.sprintf('%02d', $id % 100).self::fakeSiren($id),
+            'tva_intra' => 'FR' . sprintf('%02d', $id % 100) . self::fakeSiren($id),
             'logo' => null,
             'logo_squarred' => null,
             'barcode' => null,
             'ip' => null,
-        ]);
+            ];
+        });
     }
 
     public function anonymizeContacts(): int
     {
-        return $this->perRow('socpeople', fn (int $id): array => $this->personFields($id) + [
+        return $this->perRow('socpeople', function ($id) {
+            return $this->personFields($id) + [
             'phone_perso' => '',
             'fax' => '',
             'birthday' => null,
@@ -312,14 +340,16 @@ final class Anonymizer
             'jabberid' => '',
             'skype' => '',
             'ref_ext' => null,
-        ]);
+            ];
+        });
     }
 
     public function anonymizeUsers(string $keepLogin): int
     {
-        $where = "login <> '".$this->db->escape($keepLogin)."'";
+        $where = "login <> '" . $this->db->escape($keepLogin) . "'";
 
-        return $this->perRow('user', fn (int $id): array => $this->personFields($id, 'office_phone', 'user_mobile') + [
+        return $this->perRow('user', function ($id) {
+            return $this->personFields($id, 'office_phone', 'user_mobile') + [
             'login' => self::fakeLogin($id),
             'pass' => null,
             'pass_crypted' => null,
@@ -342,7 +372,8 @@ final class Anonymizer
             'idpers1' => '', 'idpers2' => '', 'idpers3' => '',
             'iplastlogin' => '0.0.0.0',
             'ippreviouslogin' => '0.0.0.0',
-        ], $where);
+            ];
+        }, $where);
     }
 
     public function anonymizeEmployment(): int
@@ -352,7 +383,8 @@ final class Anonymizer
 
     public function anonymizeMembers(): int
     {
-        return $this->perRow('adherent', fn (int $id): array => $this->personFields($id) + [
+        return $this->perRow('adherent', function ($id) {
+            return $this->personFields($id) + [
             'login' => self::fakeLogin($id),
             'pass' => null,
             'pass_crypted' => null,
@@ -363,12 +395,14 @@ final class Anonymizer
             'birth' => null,
             'photo' => null,
             'ip' => '0.0.0.0',
-        ]);
+            ];
+        });
     }
 
     public function anonymizeBankData(): int
     {
-        $rib = static fn (int $id): array => [
+        $rib = function ($id) {
+            return [
             'bank' => 'Banque Anonyme',
             'code_banque' => '00000',
             'code_guichet' => '00000',
@@ -381,9 +415,11 @@ final class Anonymizer
             'owner_address' => '',
             'owner_zip' => '',
             'owner_town' => '',
-        ];
+            ];
+        };
 
-        $count = $this->perRow('societe_rib', static fn (int $id): array => $rib($id) + [
+        $count = $this->perRow('societe_rib', function ($id) use ($rib) {
+            return $rib($id) + [
             'last_four' => '0000',
             'cvn' => '',
             'email' => '',
@@ -392,9 +428,14 @@ final class Anonymizer
             'card_type' => null,
             'rum' => '',
             'ipaddress' => '0.0.0.0',
-        ]);
-        $count += $this->perRow('user_rib', static fn (int $id): array => $rib($id + 2000000));
-        $count += $this->perRow('bank_account', static fn (int $id): array => $rib($id + 1000000));
+            ];
+        });
+        $count += $this->perRow('user_rib', function ($id) use ($rib) {
+            return $rib($id + 2000000);
+        });
+        $count += $this->perRow('bank_account', function ($id) use ($rib) {
+            return $rib($id + 1000000);
+        });
 
         $count += $this->bulk('prelevement_lignes', [
             'client_nom' => 'Titulaire Anonyme',
@@ -456,12 +497,14 @@ final class Anonymizer
 
     public function anonymizeMailings(): int
     {
-        $count = $this->perRow('mailing_cibles', fn (int $id): array => [
+        $count = $this->perRow('mailing_cibles', function ($id) {
+            return [
             'lastname' => self::fakeLastname($id),
             'firstname' => self::fakeFirstname($id),
             'email' => self::fakeEmail($id),
             'other' => '',
-        ]);
+            ];
+        });
         $count += $this->bulk('mailing_unsubscribe', [
             'email' => ['raw' => $this->concat("'unsubscribed_'", 'rowid', "'@example.com'")],
             'ip' => '0.0.0.0',
@@ -480,19 +523,23 @@ final class Anonymizer
 
     public function anonymizeHr(): int
     {
-        $count = $this->perRow('recruitment_recruitmentcandidature', fn (int $id): array => $this->personFields($id) + [
+        $count = $this->perRow('recruitment_recruitmentcandidature', function ($id) {
+            return $this->personFields($id) + [
             'date_birth' => null,
             'remuneration_requested' => null,
             'remuneration_proposed' => null,
             'description' => '',
-        ]);
-        $count += $this->perRow('eventorganization_conferenceorboothattendee', fn (int $id): array => [
+            ];
+        });
+        $count += $this->perRow('eventorganization_conferenceorboothattendee', function ($id) {
+            return [
             'firstname' => self::fakeFirstname($id),
             'lastname' => self::fakeLastname($id),
             'email' => self::fakeEmail($id),
             'email_company' => '',
             'ip' => null,
-        ]);
+            ];
+        });
 
         return $count;
     }
@@ -508,7 +555,7 @@ final class Anonymizer
     public function anonymizeConstants(): int
     {
         $count = 0;
-        foreach ($this->select('SELECT rowid, name, value FROM '.MAIN_DB_PREFIX.'const') as $row) {
+        foreach ($this->select('SELECT rowid, name, value FROM ' . MAIN_DB_PREFIX . 'const') as $row) {
             $name = (string) $row->name;
             $current = (string) $row->value;
             $value = null;
@@ -522,18 +569,22 @@ final class Anonymizer
                 $value = self::fakeTown((int) $row->rowid);
             } elseif ('MAIN_INFO_SOCIETE_MAIL' === $name) {
                 $value = 'contact@example.com';
-            } elseif (1 === preg_match('/^MAIN_INFO_(SOCIETE_|SIREN|SIRET|APE|RCS|TVAINTRA|PROFID|CAPITAL)/', $name)
-                && ! in_array($name, self::KEPT_COMPANY_CONSTS, true)) {
+            } elseif (
+                1 === preg_match('/^MAIN_INFO_(SOCIETE_|SIREN|SIRET|APE|RCS|TVAINTRA|PROFID|CAPITAL)/', $name)
+                && ! in_array($name, self::KEPT_COMPANY_CONSTS, true)
+            ) {
                 $value = '';
-            } elseif (1 === preg_match(self::SECRET_CONST_PATTERN, $name)
-                && ! str_starts_with($name, 'MAIN_SECURITY_')
-                && 1 !== preg_match('/^[01]?$/', $current)) {
+            } elseif (
+                1 === preg_match(self::SECRET_CONST_PATTERN, $name)
+                && 0 !== strpos($name, 'MAIN_SECURITY_')
+                && 1 !== preg_match('/^[01]?$/', $current)
+            ) {
                 // MAIN_SECURITY_* and 0/1 values are settings (MAIN_SECURITY_CSRF_WITH_TOKEN...), not secrets.
                 $value = '';
             }
 
             if (null !== $value) {
-                $this->exec('UPDATE '.MAIN_DB_PREFIX."const SET value = '".$this->db->escape($value)."' WHERE rowid = ".(int) $row->rowid);
+                $this->exec('UPDATE ' . MAIN_DB_PREFIX . "const SET value = '" . $this->db->escape($value) . "' WHERE rowid = " . (int) $row->rowid);
                 $count++;
             }
         }
@@ -548,14 +599,14 @@ final class Anonymizer
      */
     public function clearTextExtrafields(): array
     {
-        if ( ! $this->tableExists('extrafields')) {
+        if (! $this->tableExists('extrafields')) {
             return [];
         }
 
         $byTable = [];
-        $types = "'".implode("', '", self::TEXT_EXTRAFIELD_TYPES)."'";
-        foreach ($this->select('SELECT name, elementtype FROM '.MAIN_DB_PREFIX.'extrafields WHERE type IN ('.$types.')') as $row) {
-            $table = preg_replace('/[^a-z0-9_]/', '', mb_strtolower((string) $row->elementtype)).'_extrafields';
+        $types = "'" . implode("', '", self::TEXT_EXTRAFIELD_TYPES) . "'";
+        foreach ($this->select('SELECT name, elementtype FROM ' . MAIN_DB_PREFIX . 'extrafields WHERE type IN (' . $types . ')') as $row) {
+            $table = preg_replace('/[^a-z0-9_]/', '', strtolower((string) $row->elementtype)) . '_extrafields';
             $byTable[$table][(string) $row->name] = null;
         }
 
@@ -580,7 +631,9 @@ final class Anonymizer
             if ([] === $noteColumns) {
                 continue;
             }
-            $where = implode(' OR ', array_map(static fn (string $c): string => "({$c} IS NOT NULL AND {$c} <> '')", $noteColumns));
+            $where = implode(' OR ', array_map(function ($c) {
+                return "({$c} IS NOT NULL AND {$c} <> '')";
+            }, $noteColumns));
             $count = $this->countRows($table, $where);
             if ($count > 0) {
                 $this->bulk($table, array_fill_keys($noteColumns, ''), $where);
@@ -595,7 +648,7 @@ final class Anonymizer
     {
         $count = $this->countRows($table);
         if ($count > 0) {
-            $this->exec('DELETE FROM '.MAIN_DB_PREFIX.$table);
+            $this->exec('DELETE FROM ' . MAIN_DB_PREFIX . $table);
         }
 
         return $count;
@@ -615,7 +668,7 @@ final class Anonymizer
             $summary['contacts'] = $this->countRows('socpeople');
         }
         if (empty($skip['users'])) {
-            $summary['users'] = $this->countRows('user', "login <> '".$this->db->escape($keepLogin)."'");
+            $summary['users'] = $this->countRows('user', "login <> '" . $this->db->escape($keepLogin) . "'");
             $summary['employment'] = $this->countRows('user_employment');
         }
         if (empty($skip['members'])) {
@@ -662,20 +715,20 @@ final class Anonymizer
     /**
      * Update every row with values computed from its id.
      *
-     * @param  callable(int): array<string, mixed>  $values
+     * @param  callable $values Receives the row id, returns the values
      */
     private function perRow(string $table, callable $values, string $where = '1 = 1'): int
     {
-        if ( ! $this->tableExists($table)) {
+        if (! $this->tableExists($table)) {
             return 0;
         }
 
-        $ids = array_map(
-            static fn (object $row): int => (int) $row->rowid,
-            $this->select('SELECT rowid FROM '.MAIN_DB_PREFIX.$table.' WHERE '.$where)
-        );
+        $ids = [];
+        foreach ($this->select('SELECT rowid FROM ' . MAIN_DB_PREFIX . $table . ' WHERE ' . $where) as $row) {
+            $ids[] = (int) $row->rowid;
+        }
         foreach ($ids as $id) {
-            $this->update($table, $values($id), 'rowid = '.$id);
+            $this->update($table, $values($id), 'rowid = ' . $id);
         }
 
         return count($ids);
@@ -688,7 +741,7 @@ final class Anonymizer
      */
     private function bulk(string $table, array $values, string $where = '1 = 1'): int
     {
-        if ( ! $this->tableExists($table)) {
+        if (! $this->tableExists($table)) {
             return 0;
         }
         $count = $this->countRows($table, $where);
@@ -704,33 +757,33 @@ final class Anonymizer
      *
      * @param  array<string, mixed>  $values  null => NULL, ['raw' => sql] => SQL expression, else a string literal
      */
-    private function update(string $table, array $values, string $where): void
+    private function update(string $table, array $values, string $where)
     {
         $columns = $this->columns($table);
         $set = [];
         foreach ($values as $column => $value) {
-            if ( ! in_array(mb_strtolower($column), $columns, true)) {
+            if (!in_array(strtolower($column), $columns, true)) {
                 continue;
             }
             if (null === $value) {
-                $set[] = $column.' = NULL';
+                $set[] = $column . ' = NULL';
             } elseif (is_array($value)) {
-                $set[] = $column.' = '.$value['raw'];
+                $set[] = $column . ' = ' . $value['raw'];
             } else {
-                $set[] = $column." = '".$this->db->escape((string) $value)."'";
+                $set[] = $column . " = '" . $this->db->escape((string) $value) . "'";
             }
         }
         if ([] === $set) {
             return;
         }
 
-        $this->exec('UPDATE '.MAIN_DB_PREFIX.$table.' SET '.implode(', ', $set).' WHERE '.$where);
+        $this->exec('UPDATE ' . MAIN_DB_PREFIX . $table . ' SET ' . implode(', ', $set) . ' WHERE ' . $where);
     }
 
     private function concat(string ...$parts): string
     {
         return in_array($this->dbType, ['mysql', 'mysqli'], true)
-            ? 'CONCAT('.implode(', ', $parts).')'
+            ? 'CONCAT(' . implode(', ', $parts) . ')'
             : implode(' || ', $parts);
     }
 
@@ -748,16 +801,35 @@ final class Anonymizer
         return $rows;
     }
 
-    private function exec(string $sql): mixed
+    /**
+     * @return mixed Result of the query
+     */
+    private function exec(string $sql)
     {
         $resql = $this->db->query($sql);
-        if ( ! $resql) {
-            $message = 'SQL error: '.$this->db->lasterror().' in: '.$sql;
-            DolibarrHelper::log('anonymize: '.$message, LOG_ERR);
+        if (!$resql) {
+            $message = 'SQL error: ' . $this->db->lasterror() . ' in: ' . $sql;
+            Log::error('anonymize: ' . $message);
 
-            throw new RuntimeException($message);
+            throw Failure::operation('SQL_ERROR', $message);
         }
 
         return $resql;
+    }
+
+    /**
+     * Column of a result row, whatever the case the database gives it.
+     *
+     * @param object $row
+     */
+    private static function field($row, string $name): string
+    {
+        $vars = get_object_vars($row);
+        if (isset($vars[$name])) {
+            return (string) $vars[$name];
+        }
+        $upper = strtoupper($name);
+
+        return isset($vars[$upper]) ? (string) $vars[$upper] : '';
     }
 }

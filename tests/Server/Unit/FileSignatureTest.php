@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Util\FileSignature;
+use Dolicli\Upgrade\FileSignature;
 
 it('reports missing and modified files', function (): void {
     $root = DOLICLI_TEST_TMP.'/sig-'.bin2hex(random_bytes(4));
