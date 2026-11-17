@@ -65,7 +65,7 @@ servers:
 
 | Commande | Rôle |
 |----------|------|
-| `dolifleet add <serveur> --root=<htdocs>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire |
+| `dolifleet add <serveur> --root=<htdocs>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire (voir ci-dessous) |
 | `dolifleet hostkey <serveur> [--accept]` | Clé d'hôte SSH : connue ou non, empreintes, ajout à `known_hosts` ; code 3 si le serveur ne répond pas |
 | `dolifleet config validate` | Valide l'inventaire et ses inclusions |
 | `dolifleet discover <serveur>` | Liste les instances trouvées sur un serveur, sans modifier l'inventaire |
@@ -84,6 +84,15 @@ servers:
 `--json` donne une sortie exploitable par un script. Codes de retour : 0 si tout a réussi, 1 si au moins une instance a échoué, 2 en cas d'usage invalide (inventaire, cible vide, confirmation absente), 3 si aucune instance n'a été jointe.
 
 La découverte ne voit que les dossiers que le compte SSH peut lister : les dossiers d'hébergement sont souvent traversables sans être listables (mode 711). Dans ce cas, elle teste `htdocs/` et `dolibarr/htdocs/` à l'intérieur et nomme les dossiers qu'elle n'a pas pu lister ; si une instance manque encore, donnez à `--root` le dossier d'installation ou son `htdocs`, ou cherchez en root avec `--sudo`.
+
+Options de `dolifleet add` pour un script ou une interface :
+
+- `--instances=<id>[,...]` : instances à ajouter, désignées par l'identifiant trouvé (sans cette option, la question est posée, ou toutes sont ajoutées hors terminal).
+- `--rename=<id-trouvé>=<nouvel-id>[,...]` : enregistre une instance sous un autre identifiant, par exemple `--rename=dolibarr=client-a-prod`. Le nouvel identifiant suit les règles de l'inventaire (`[a-z0-9][a-z0-9_-]*`, pas `all`), ne doit pas exister déjà ni être choisi deux fois ; sinon rien n'est écrit (code 2).
+- `--tags=<étiquette>[,...]` : étiquettes de toutes les instances ajoutées.
+- `--prod=<id-trouvé>[,...]` : ces instances reçoivent en plus la première étiquette de `protected_tags` (`prod` par défaut), donc la protection des instances de production.
+- `--accept-host-key` : ajoute une clé d'hôte inconnue sans question (l'empreinte reste affichée).
+- `--json` : aucune question ; la sortie standard donne `{"server": ..., "file": ..., "added": [{"id": ..., "found_as": ..., "htdocs": ..., "tags": [...]}]}`, la progression et les erreurs passent sur la sortie d'erreur.
 
 ## Garde-fous
 

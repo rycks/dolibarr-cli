@@ -385,3 +385,49 @@ it('tells an unknown host key from a changed one, fingerprints scanned keys and 
         ->and(file_get_contents($file))->toBe($keys."\n")
         ->and(fn () => $hostKey->fingerprints('not a key'))->toThrow(RuntimeException::class, 'Cannot compute the fingerprint');
 });
+
+it('adds found instances under new identifiers, with the first protected tag on production ones', function (): void {
+    $file = fleetInventory();
+    file_put_contents($file, str_replace('protected_tags: [prod]', 'protected_tags: [critical, prod]', (string) file_get_contents($file)));
+    $root = '--root='.dirname(DOLICLI_DOLPATH, 2);
+    $found = 'dolibarr-integration-sqlite';
+
+    $result = fleetJson(['add', 'local-b', $root, '--php='.PHP_BINARY, '--instances='.$found, '--rename='.$found.'=client-x-prod', '--prod='.$found, '--tags=client-x,critical']);
+    $inventory = Inventory::load($file);
+
+    expect($result['code'])->toBe(0)
+        ->and($result['json'])->toBe(['server' => 'local-b', 'file' => $file, 'added' => [['id' => 'client-x-prod', 'found_as' => $found, 'htdocs' => DOLICLI_DOLPATH, 'tags' => ['critical', 'client-x']]]])
+        ->and($inventory->instance('client-x-prod')->tags)->toBe(['critical', 'client-x'])
+        ->and($inventory->instance('client-x-prod')->server)->toBe('local-b')
+        ->and($inventory->instances())->not->toHaveKey($found);
+
+    $new = DOLICLI_TEST_TMP.'/fleet/new-prod/inventory.yaml';
+    $plain = fleet(['add', 'local-c', $root, '--php='.PHP_BINARY, '--rename='.$found.'=true', '--prod='.$found], null, ['DOLIFLEET_INVENTORY' => $new]);
+
+    expect($plain['code'])->toBe(0)
+        ->and(Inventory::load($new)->instance('true')->tags)->toBe(['prod']);
+});
+
+it('refuses invalid, reserved, taken or unknown identifiers of add before writing the inventory', function (): void {
+    $file = fleetInventory();
+    $before = (string) file_get_contents($file);
+    $base = ['add', 'local-b', '--root='.dirname(DOLICLI_DOLPATH, 2), '--php='.PHP_BINARY];
+    $found = 'dolibarr-integration-sqlite';
+    $cases = [
+        ['--rename='.$found.'=all', 'not a valid identifier'],
+        ['--rename='.$found.'=Bad_Id', 'not a valid identifier'],
+        ['--rename='.$found.'=dev1', "New identifier 'dev1' of '{$found}' is already in the inventory"],
+        ['--rename='.$found, "Invalid --rename item '{$found}'"],
+        ['--rename=other=x', "Instance 'other' of --rename is not among the instances to add"],
+        ['--prod=dev1', "Instance 'dev1' of --prod is not among the instances to add"],
+        ['--tags=Prod', "Invalid tag 'Prod'"],
+    ];
+    foreach ($cases as [$option, $message]) {
+        $result = fleet(array_merge($base, [$option]));
+
+        expect($result['code'])->toBe(2)
+            ->and($result['err'])->toContain($message);
+    }
+
+    expect(file_get_contents($file))->toBe($before);
+});

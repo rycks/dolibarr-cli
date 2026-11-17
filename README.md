@@ -111,10 +111,13 @@ servers:
 ```
 
 The identifier of a discovered instance is the name of the directory containing `htdocs/`, here
-`dolibarr`: rename it in the inventory (for example `example-prod`) before `dolifleet setup`,
-which writes the same identifier in `/etc/dolicli/instances.ini` on the server. Add the tag `prod`
-by hand to production instances (protected by default), and `web_php`, `dolibarr_user` or
-`maintenance_login` when needed:
+`dolibarr`: give it another one before `dolifleet setup`, which writes the same identifier in
+`/etc/dolicli/instances.ini` on the server, either while adding (`--rename=dolibarr=example-prod`,
+several pairs comma separated; `--instances` keeps the found identifiers) or later in the
+inventory. `--prod=dolibarr` gives production instances the first tag of `protected_tags` (`prod`
+by default, protected) in addition to `--tags`; `--json` prints the added instances
+(`server`, `file`, `added` with `id`, `found_as`, `htdocs`, `tags`). Add `web_php`,
+`dolibarr_user` or `maintenance_login` by hand when needed:
 
 ```yaml
       example-prod:
