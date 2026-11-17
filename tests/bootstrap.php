@@ -30,6 +30,13 @@ if ( ! is_file(DOLICLI_TEST_DB)) {
     fwrite(STDERR, 'SQLite Dolibarr database not found: '.DOLICLI_TEST_DB." (run composer install)\n");
     exit(1);
 }
+// Top-level files of documents/ before the run: files a test adds (install.lock...) are removed after it.
+define('DOLICLI_TEST_DOCUMENTS', dirname(DOLICLI_TEST_DB));
+$GLOBALS['dolicliInitialDocuments'] = array_values(array_filter(
+    (array) scandir(DOLICLI_TEST_DOCUMENTS),
+    static fn ($f): bool => is_string($f) && is_file(DOLICLI_TEST_DOCUMENTS.'/'.$f)
+));
+
 if ( ! copy(DOLICLI_TEST_DB, DOLICLI_TEST_DB_BACKUP)) {
     fwrite(STDERR, "Cannot back up the SQLite Dolibarr database\n");
     exit(1);

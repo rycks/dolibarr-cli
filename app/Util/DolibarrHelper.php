@@ -19,6 +19,18 @@ class DolibarrHelper
     }
 
     /**
+     * Value of a Dolibarr constant ($conf->global), compatible with versions without getDolGlobalString().
+     */
+    public static function conf(string $name, string $default = ''): string
+    {
+        global $conf;
+
+        $value = $conf->global->{$name} ?? null;
+
+        return (null === $value || '' === $value) ? $default : (string) $value;
+    }
+
+    /**
      * Find the first active admin user, super admins (entity 0) first.
      *
      * @return string|null Login of the user, or null if none found

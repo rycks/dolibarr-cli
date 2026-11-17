@@ -4,24 +4,25 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
-use App\Support\ExitStatus;
-use Minicli\Command\CommandController;
+use App\Support\Command;
+use App\Util\FileSignature;
+use App\Util\Http;
 
-class FilecheckController extends CommandController
+class FilecheckController extends Command
 {
-    private const EXIT_OK = 0;
     private const EXIT_MODIFIED = 1;
-    private const EXIT_MISSING = 2;
-    private const EXIT_NO_XML = 3;
 
-    private int $exitCode = self::EXIT_OK;
+    private const EXIT_MISSING = 2;
+
+    private const EXIT_NO_XML = 3;
 
     public function usage(): void
     {
-        $this->info("Dolibarr deployment integrity check
+        $this->info('Dolibarr deployment integrity check
 
 Usage:
   ./dolibarr system filecheck
+  ./dolibarr system filecheck --remote
   ./dolibarr system filecheck --xmlfile=/path/to/filelist-X.Y.Z.xml
   ./dolibarr system filecheck --show-ok
   ./dolibarr system filecheck --detect-extra
@@ -29,16 +30,18 @@ Usage:
 
 Description:
   Verifies the integrity of a Dolibarr deployment by comparing the MD5
-  checksum of every file in htdocs/ with the reference signature shipped
-  in htdocs/install/filelist-<version>.xml.
+  checksum of every file in htdocs/ with a reference signature: the one
+  shipped in htdocs/install/filelist-<version>.xml, or the official one
+  published on dolibarr.org (--remote).
 
 Options:
-  --xmlfile=PATH   Use a specific XML signature file (default: auto-detect
-                   from current DOL_VERSION in htdocs/install/)
+  --remote         Use the official signature from dolibarr.org (recommended:
+                   the local one can be altered along with the files)
+  --xmlfile=PATH   Use a specific XML signature file
   --show-ok        Also display files that match (verbose)
   --detect-extra   Report files present on disk but not in the signature
                    (slower: scans the whole htdocs tree)
-  --format=text    Human-readable table output (default)
+  --format=text    Human-readable output (default)
   --format=json    Machine-readable JSON output
   --help           Display this help message
 
@@ -49,245 +52,167 @@ Exit codes:
   3  Reference XML signature not found
 
 Examples:
-  ./dolibarr system filecheck
+  ./dolibarr system filecheck --remote
   ./dolibarr system filecheck --detect-extra --show-ok
-  ./dolibarr system filecheck --format=json > report.json");
+  ./dolibarr system filecheck --format=json > report.json');
     }
 
     public function handle(): void
     {
+        global $conffile;
+
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        if (!$this->validateDolibarrEnvironment()) {
-            $this->setExit(self::EXIT_NO_XML);
+        if ( ! defined('DOL_DOCUMENT_ROOT') || ! defined('DOL_VERSION')) {
+            $this->fail('Dolibarr is not loaded: check the DOLPATH environment variable.', self::EXIT_NO_XML);
+
             return;
         }
 
-        $xmlfile = $this->resolveXmlFile();
-        if ($xmlfile === null) {
-            $this->setExit(self::EXIT_NO_XML);
+        $source = '';
+        $xmlContent = $this->loadSignature($source);
+        if (null === $xmlContent) {
             return;
         }
 
-        $xml = simplexml_load_file($xmlfile);
-        if ($xml === false) {
-            $this->error("Failed to parse XML signature: " . $xmlfile);
-            $this->setExit(self::EXIT_NO_XML);
+        $root = FileSignature::parse($xmlContent);
+        if (null === $root) {
+            $this->fail('Invalid XML signature (no dolibarr_htdocs_dir node): '.$source, self::EXIT_NO_XML);
+
             return;
         }
 
-        if (!isset($xml->dolibarr_htdocs_dir[0])) {
-            $this->error("XML signature does not contain dolibarr_htdocs_dir node: " . $xmlfile);
-            $this->setExit(self::EXIT_NO_XML);
-            return;
-        }
-
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/files.lib.php';
-
-        $fileList = ['insignature' => [], 'missing' => [], 'updated' => [], 'added' => [], 'ok' => []];
-        $checksumconcat = [];
-
-        $this->scanFiles($fileList, $xml->dolibarr_htdocs_dir[0], '', DOL_DOCUMENT_ROOT, $checksumconcat);
-
+        // Debian/RPM packages patch filefunc.inc.php: Dolibarr ignores it there, so do we.
+        $isPackaged = isset($conffile) && '/etc/dolibarr/conf.php' === $conffile;
+        $fileList = FileSignature::compare($root, DOL_DOCUMENT_ROOT, $isPackaged);
         if ($this->hasFlag('detect-extra')) {
-            $this->detectExtraFiles($fileList, $xml->dolibarr_htdocs_dir[0]);
+            $fileList['added'] = FileSignature::extraFiles($root, DOL_DOCUMENT_ROOT, $fileList['insignature']);
         }
 
-        $format = $this->getParam('format') ?? 'text';
-
-        if ($format === 'json') {
-            $this->renderJson($fileList, $xmlfile);
+        if ('json' === $this->param('format')) {
+            $this->renderJson($fileList, $source);
         } else {
-            $this->renderText($fileList, $xmlfile);
+            $this->renderText($fileList, $source);
         }
 
-        if (!empty($fileList['missing'])) {
-            $this->setExit(self::EXIT_MISSING);
-        } elseif (!empty($fileList['updated'])) {
-            $this->setExit(self::EXIT_MODIFIED);
+        if ([] !== $fileList['missing']) {
+            $this->failSilently('filecheck: '.count($fileList['missing']).' file(s) missing', self::EXIT_MISSING);
+        } elseif ([] !== $fileList['updated']) {
+            $this->failSilently('filecheck: '.count($fileList['updated']).' file(s) modified', self::EXIT_MODIFIED);
         }
     }
 
-    private function validateDolibarrEnvironment(): bool
+    private function loadSignature(string &$source): ?string
     {
-        if (!defined('DOL_DOCUMENT_ROOT')) {
-            $this->error("DOL_DOCUMENT_ROOT is not defined!");
-            $this->info("Please ensure Dolibarr is properly initialized (DOLPATH env var).");
-            return false;
-        }
-        if (!defined('DOL_VERSION')) {
-            $this->error("DOL_VERSION is not defined!");
-            return false;
-        }
-        return true;
-    }
-
-    private function resolveXmlFile(): ?string
-    {
-        $custom = $this->getParam('xmlfile');
-        if ($custom !== null && $custom !== '') {
-            if (!is_file($custom)) {
-                $this->error("XML signature file not found: " . $custom);
-                return null;
+        if ($this->hasFlag('remote')) {
+            $source = sprintf(FileSignature::REMOTE_URL, DOL_VERSION);
+            $content = Http::get($source, 60);
+            if (null === $content) {
+                $this->fail('Cannot download the official signature: '.Http::lastError(), self::EXIT_NO_XML);
             }
-            return $custom;
+
+            return $content;
         }
 
-        $candidate = DOL_DOCUMENT_ROOT . '/install/filelist-' . DOL_VERSION . '.xml';
-        if (is_file($candidate)) {
-            return $candidate;
+        $custom = $this->param('xmlfile');
+        $source = (null !== $custom && '' !== $custom) ? $custom : DOL_DOCUMENT_ROOT.'/install/filelist-'.DOL_VERSION.'.xml';
+        if ( ! is_file($source)) {
+            $this->fail('Reference XML signature not found: '.$source, self::EXIT_NO_XML);
+            if (null === $custom) {
+                $this->info('Use --remote for the official signature, or --xmlfile=PATH.');
+            }
+
+            return null;
         }
 
-        $this->error("Reference XML signature not found: " . $candidate);
-        $this->info("Use --xmlfile=PATH to point to a specific signature file.");
-        return null;
+        $content = file_get_contents($source);
+        if (false === $content) {
+            $this->fail('Cannot read '.$source, self::EXIT_NO_XML);
+
+            return null;
+        }
+
+        return $content;
     }
 
     /**
-     * Recursive scan that mirrors the logic of Dolibarr's getFilesUpdated()
-     * but also collects 'ok' entries when --show-ok is requested.
-     *
-     * @param array<string,array<int,mixed>> $fileList
+     * @param  array<string, array<int, mixed>>  $fileList
      */
-    private function scanFiles(array &$fileList, \SimpleXMLElement $dir, string $path, string $pathref, array &$checksumconcat): void
+    private function renderText(array $fileList, string $source): void
     {
-        global $conffile;
-
-        foreach ($dir->md5file as $file) {
-            $filename = $path . (string) $file['name'];
-            $expectedmd5 = (string) $file;
-            $expectedsize = (string) ($file['size'] ?? '');
-
-            $fileList['insignature'][] = $filename;
-
-            $fullpath = $pathref . '/' . $filename;
-            if (!file_exists($fullpath)) {
-                $fileList['missing'][] = [
-                    'filename' => $filename,
-                    'expectedmd5' => $expectedmd5,
-                    'expectedsize' => $expectedsize,
-                ];
-                continue;
-            }
-
-            $md5local = md5_file($fullpath);
-
-            // Same exception as Dolibarr: ignore filefunc.inc.php on deb/rpm installs
-            if (isset($conffile) && $conffile === '/etc/dolibarr/conf.php' && $filename === '/filefunc.inc.php') {
-                $checksumconcat[] = $expectedmd5;
-                continue;
-            }
-
-            if ($md5local !== $expectedmd5) {
-                $fileList['updated'][] = [
-                    'filename' => $filename,
-                    'expectedmd5' => $expectedmd5,
-                    'md5' => (string) $md5local,
-                    'expectedsize' => $expectedsize,
-                ];
-            } else {
-                $fileList['ok'][] = ['filename' => $filename, 'md5' => (string) $md5local];
-            }
-            $checksumconcat[] = $md5local;
-        }
-
-        foreach ($dir->dir as $subdir) {
-            $this->scanFiles($fileList, $subdir, $path . (string) $subdir['name'] . '/', $pathref, $checksumconcat);
-        }
-    }
-
-    private function detectExtraFiles(array &$fileList, \SimpleXMLElement $rootDir): void
-    {
-        $includecustom = (int) ($rootDir['includecustom'] ?? 0);
-
-        $regextoinclude = '\.(php|php3|php4|php5|phtml|phps|phar|inc|css|scss|html|xml|js|json|tpl|jpg|jpeg|png|gif|ico|sql|lang|txt|yml|bak|md|mp3|mp4|wav|mkv|z|gz|zip|rar|tar|less|svg|eot|woff|woff2|ttf|manifest)$';
-        $regextoexclude = '(' . ($includecustom ? '' : 'custom|') . 'documents|conf|install|dejavu-fonts-ttf-.*|public\/test|sabre\/sabre\/.*\/tests|Shared\/PCLZip|nusoap\/lib\/Mail|php\/example|php\/test|geoip\/sample.*\.php|ckeditor\/samples|ckeditor\/adapters)$';
-
-        $scanfiles = dol_dir_list(DOL_DOCUMENT_ROOT, 'files', 1, $regextoinclude, $regextoexclude);
-        $insignature = array_flip($fileList['insignature']);
-
-        foreach ($scanfiles as $file) {
-            $relative = preg_replace('/^' . preg_quote(DOL_DOCUMENT_ROOT, '/') . '/', '', $file['fullname']);
-            if (!isset($insignature[$relative])) {
-                $fileList['added'][] = [
-                    'filename' => $relative,
-                    'md5' => (string) @md5_file($file['fullname']),
-                ];
-            }
-        }
-    }
-
-    private function renderText(array $fileList, string $xmlfile): void
-    {
-        $this->info("Dolibarr file integrity check");
-        $this->display("Version:   " . DOL_VERSION);
-        $this->display("Document root: " . DOL_DOCUMENT_ROOT);
-        $this->display("Signature: " . $xmlfile);
-        $this->display("");
+        $this->info('Dolibarr file integrity check');
+        $this->display('Version:       '.DOL_VERSION);
+        $this->display('Document root: '.DOL_DOCUMENT_ROOT);
+        $this->display('Signature:     '.$source);
+        $this->display('');
 
         $missing = $fileList['missing'];
         $updated = $fileList['updated'];
         $added = $fileList['added'];
         $ok = $fileList['ok'];
 
-        if (!empty($missing)) {
-            $this->error("Missing files: " . count($missing));
+        if ([] !== $missing) {
+            $this->error('Missing files: '.count($missing));
             foreach ($missing as $f) {
-                $this->display("  [MISSING ] " . $f['filename'] . "  (expected md5=" . $f['expectedmd5'] . ")");
+                $this->display('  [MISSING ] '.$f['filename'].'  (expected md5='.$f['expectedmd5'].')');
             }
-            $this->display("");
+            $this->display('');
         }
 
-        if (!empty($updated)) {
-            $this->error("Modified files: " . count($updated));
+        if ([] !== $updated) {
+            $this->error('Modified files: '.count($updated));
             foreach ($updated as $f) {
-                $this->display("  [MODIFIED] " . $f['filename']);
-                $this->display("             expected " . $f['expectedmd5'] . "  got " . $f['md5']);
+                $this->display('  [MODIFIED] '.$f['filename']);
+                $this->display('             expected '.$f['expectedmd5'].'  got '.$f['md5']);
             }
-            $this->display("");
+            $this->display('');
         }
 
-        if (!empty($added)) {
-            $this->info("Extra files (not in signature): " . count($added));
+        if ([] !== $added) {
+            $this->info('Extra files (not in signature): '.count($added));
             foreach ($added as $f) {
-                $this->display("  [EXTRA   ] " . $f['filename'] . "  (md5=" . $f['md5'] . ")");
+                $this->display('  [EXTRA   ] '.$f['filename'].'  (md5='.$f['md5'].')');
             }
-            $this->display("");
+            $this->display('');
         }
 
-        if ($this->hasFlag('show-ok') && !empty($ok)) {
-            $this->display("OK files: " . count($ok));
+        if ($this->hasFlag('show-ok') && [] !== $ok) {
+            $this->display('OK files: '.count($ok));
             foreach ($ok as $f) {
-                $this->display("  [OK      ] " . $f['filename']);
+                $this->display('  [OK      ] '.$f['filename']);
             }
-            $this->display("");
+            $this->display('');
         }
 
-        $this->info("Summary:");
-        $this->display("  In signature: " . count($fileList['insignature']));
-        $this->display("  OK:           " . count($ok));
-        $this->display("  Modified:     " . count($updated));
-        $this->display("  Missing:      " . count($missing));
+        $this->info('Summary:');
+        $this->display('  In signature: '.count($fileList['insignature']));
+        $this->display('  OK:           '.count($ok));
+        $this->display('  Modified:     '.count($updated));
+        $this->display('  Missing:      '.count($missing));
         if ($this->hasFlag('detect-extra')) {
-            $this->display("  Extra:        " . count($added));
+            $this->display('  Extra:        '.count($added));
         }
 
-        if (empty($missing) && empty($updated)) {
-            $this->success("Deployment integrity OK.");
+        if ([] === $missing && [] === $updated) {
+            $this->success('Deployment integrity OK.');
         } else {
-            $this->error("Deployment integrity FAILED.");
+            $this->error('Deployment integrity FAILED.');
         }
     }
 
-    private function renderJson(array $fileList, string $xmlfile): void
+    /**
+     * @param  array<string, array<int, mixed>>  $fileList
+     */
+    private function renderJson(array $fileList, string $source): void
     {
         $payload = [
             'version' => DOL_VERSION,
             'document_root' => DOL_DOCUMENT_ROOT,
-            'signature' => $xmlfile,
+            'signature' => $source,
             'summary' => [
                 'in_signature' => count($fileList['insignature']),
                 'ok' => count($fileList['ok']),
@@ -304,17 +229,6 @@ Examples:
             $payload['ok'] = $fileList['ok'];
         }
 
-        $this->display((string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-    }
-
-    private function setExit(int $code): void
-    {
-        $this->exitCode = $code;
-        ExitStatus::set($code);
-    }
-
-    public function required(): array
-    {
-        return [];
+        $this->rawOutput(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n");
     }
 }

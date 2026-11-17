@@ -78,4 +78,10 @@ function restoreTestDb(): void
     if ( ! copy(DOLICLI_TEST_DB_BACKUP, DOLICLI_TEST_DB)) {
         throw new RuntimeException('Cannot restore the SQLite Dolibarr database');
     }
+    foreach ((array) scandir(DOLICLI_TEST_DOCUMENTS) as $file) {
+        $path = DOLICLI_TEST_DOCUMENTS.'/'.$file;
+        if (is_string($file) && is_file($path) && ! in_array($file, $GLOBALS['dolicliInitialDocuments'], true)) {
+            unlink($path);
+        }
+    }
 }

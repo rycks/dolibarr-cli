@@ -25,6 +25,15 @@ abstract class Command extends CommandController
     }
 
     /**
+     * Record a failure without printing it (machine-readable output must stay clean).
+     */
+    protected function failSilently(string $message, int $code = ExitStatus::FAILURE): void
+    {
+        DolibarrHelper::log($message, LOG_ERR);
+        ExitStatus::set($code);
+    }
+
+    /**
      * Read a key=value parameter, accepting both `name=value` and `--name=value`.
      */
     protected function param(string $name): ?string

@@ -4,64 +4,68 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
+use App\Support\ExitStatus;
+use App\Util\DatabaseBackup;
 use App\Util\DolibarrHelper;
+use App\Util\FileSignature;
+use App\Util\Http;
+use App\Util\InstallLock;
+use App\Util\InstallScriptRunner;
+use App\Util\MigrationPlanner;
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use Throwable;
 
-class UpgradeController extends CommandController
+class UpgradeController extends Command
 {
-    private const DOLIBARR_DOWNLOAD_URL = 'https://www.dolibarr.org/files/stable/standard';
-    private const DOLIBARR_VERSIONS_URL = 'https://www.dolibarr.org/files/stable/standard/';
-    private const TEMP_DIR = '/tmp/dolibarr_upgrade';
+    private const VERSIONS_URL = 'https://www.dolibarr.org/files/stable/standard/';
 
-    // Versions remembered between the file-copy phase and the DB migration phase.
-    // Set by performFullUpgrade, consumed by performDatabaseMigration / executeUpgradeStep*.
-    private ?string $migrationFromVersion = null;
-    private ?string $migrationToVersion = null;
+    private const DOWNLOAD_URL = 'https://www.dolibarr.org/files/stable/standard/dolibarr-%s.%s';
 
-    // Ownership info captured at the start of performFullUpgrade, restored either at the
-    // normal end of the method OR via a shutdown function (Dolibarr's install/step5.php
-    // calls exit() which short-circuits everything past performDatabaseMigration()).
+    /** @var array{uid: int, gid: int, user: string, group: string}|null */
     private ?array $pendingOwnership = null;
+
+    /** @var array{uid: int, gid: int, user: string, group: string}|null */
     private ?array $pendingDataOwnership = null;
+
     private bool $ownershipRestorationDone = false;
 
-    /**
-     * Minicli's CommandCall stores key=value params with the literal key as the array key.
-     * So `--version=18.0.10` is stored under the key `--version`, while `version=18.0.10` is
-     * stored under `version`. dolicli historically uses the no-dash form (e.g. `name=...`,
-     * `limit=...`), but the upgrade usage doc has always shown the GNU-style `--version=...`.
-     * Be tolerant: try both.
-     */
-    private function getParamFlex(string $name): ?string
-    {
-        return $this->getParam($name) ?? $this->getParam('--' . $name);
-    }
+    /** File whose mtime marks the start of the upgrade (files newer than it get their owner back). */
+    private ?string $startMarker = null;
 
-    private function hasParamFlex(string $name): bool
-    {
-        return $this->hasParam($name) || $this->hasParam('--' . $name);
-    }
+    /** Private working directory (download, extraction), removed at the end. */
+    private ?string $workDir = null;
+
+    private ?InstallLock $installLock = null;
+
+    private bool $maintenanceEnabledByUs = false;
 
     public function usage(): void
     {
-        $this->info("Dolibarr Upgrade Manager - Update files and migrate database
+        $this->info('Dolibarr Upgrade Manager - Update files and migrate database
 
 Usage:
   ./dolibarr system upgrade                        - Run database migration only
-  ./dolibarr system upgrade --minor                - Upgrade to latest minor version
-  ./dolibarr system upgrade --major                - Upgrade to latest major version
+  ./dolibarr system upgrade --minor                - Upgrade to latest version of the current branch
+  ./dolibarr system upgrade --major                - Upgrade to latest published version
   ./dolibarr system upgrade --version=X.Y.Z        - Upgrade to specific version
   ./dolibarr system upgrade --check                - Check for available upgrades
   ./dolibarr system upgrade --list                 - List available versions
 
 Options:
-  --force          - Force database upgrade even if versions appear compatible
-  --skip-backup    - Skip both file backup and database backup prompt
-  --source=PATH    - Use local directory instead of downloading (skips download + extract).
-                     PATH can point either to a Dolibarr htdocs/ directory or to a
-                     directory containing htdocs/ (auto-detected).
-  --yes            - Non-interactive mode: bypass all confirmation prompts (for batch use)
-  --help           - Display this help message
+  --force            - Run the migration again even if the database looks up to date
+  from=X.Y.Z         - Version the database comes from (default: MAIN_VERSION_LAST_UPGRADE)
+  --skip-backup      - Do not back up the files nor dump the database before upgrading
+  backup-dir=PATH    - Where backups go (default: the directory containing htdocs/)
+  keep-backups=N     - After a successful backup, delete older dolicli backups beyond the N most recent
+  --skip-verify      - Do not check the new files against the official signature (dolibarr.org)
+  --source=PATH      - Use a local directory instead of downloading (skips download + extract).
+                       PATH can point either to a Dolibarr htdocs/ directory or to a
+                       directory containing htdocs/ (auto-detected).
+  --yes              - Non-interactive mode: answer yes to every confirmation
+  --help             - Display this help message
 
 Exit codes:
   0 - success
@@ -69,110 +73,105 @@ Exit codes:
 
 Database migration only (when files already updated):
   ./dolibarr system upgrade
-  ./dolibarr system upgrade --force
+  ./dolibarr system upgrade from=17.0.4
 
-Full upgrade (download + files + database):
+Full upgrade (download + verification + backup + files + database):
   ./dolibarr system upgrade --check
   ./dolibarr system upgrade --minor
-  ./dolibarr system upgrade --major
   ./dolibarr system upgrade --version=22.0.0
 
-Batch upgrade with local source (no download, no backup, no prompts):
-  ./dolibarr system upgrade --version=18.0.10 --source=/tmp/dolibarr-18.0.10 --skip-backup --yes
+Batch upgrade with local source (no download, no prompts):
+  ./dolibarr system upgrade --version=18.0.10 --source=/srv/dolibarr-18.0.10 --yes
 
-WARNING:
-- Always backup your database before upgrading!
-- Full upgrade process will temporarily enable maintenance mode
-- Test on staging environment first for major upgrades");
+Notes:
+- A jump over several major versions is migrated one major version at a time,
+  like the web installer does.
+- The database is dumped before migration unless --skip-backup is given.
+- Maintenance mode is enabled during the migration, then disabled.');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        // Handle check/list commands
         if ($this->hasFlag('check')) {
-            $currentVersion = $this->getCurrentVersion();
-            $this->info("Current Dolibarr version: $currentVersion\n");
+            $currentVersion = DOL_VERSION;
+            $this->info("Current Dolibarr version: {$currentVersion}\n");
             $this->checkForUpgrades($currentVersion);
+
             return;
         }
 
         if ($this->hasFlag('list')) {
             $this->listAvailableVersions();
+
             return;
         }
 
-        // Determine if this is a full upgrade or database-only migration
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
+
+        if ($this->hasOption('source') && ! $this->hasOption('version')) {
+            $this->fail('--source requires --version=X.Y.Z to be specified explicitly.');
+
+            return;
+        }
+
         $targetVersion = null;
+        if ($this->hasOption('version')) {
+            $targetVersion = (string) $this->param('version');
+            if ( ! MigrationPlanner::isVersion($targetVersion)) {
+                $this->fail("Invalid version '{$targetVersion}': expected X.Y.Z.");
 
-        if ($this->hasParamFlex('version')) {
-            $targetVersion = $this->getParamFlex('version');
-        } elseif ($this->hasFlag('minor')) {
-            $currentVersion = $this->getCurrentVersion();
-            $targetVersion = $this->getLatestMinorVersion($currentVersion);
-        } elseif ($this->hasFlag('major')) {
-            $targetVersion = $this->getLatestMajorVersion();
+                return;
+            }
+        } elseif ($this->hasFlag('minor') || $this->hasFlag('major')) {
+            $targetVersion = $this->hasFlag('minor')
+                ? $this->getLatestMinorVersion(DOL_VERSION)
+                : $this->getLatestMajorVersion();
+            if (null === $targetVersion) {
+                $this->fail('Could not find the target version on dolibarr.org: '.Http::lastError());
+
+                return;
+            }
         }
 
-        // source requires version to be explicit (we cannot infer it from a local directory)
-        if ($this->hasParamFlex('source') && !$this->hasParamFlex('version')) {
-            $this->error("--source requires --version=X.Y.Z to be specified explicitly.");
-            exit(1);
-        }
-
-        if ($targetVersion) {
-            // Full upgrade: download + files + database
-            $success = $this->performFullUpgrade($targetVersion);
+        if (null !== $targetVersion) {
+            $this->performFullUpgrade($targetVersion);
         } else {
-            // Database migration only
-            $success = $this->performDatabaseMigration();
-        }
-
-        if (!$success) {
-            exit(1);
+            $this->performDatabaseOnlyMigration();
         }
     }
 
     // ==================== VERSION MANAGEMENT ====================
 
-    private function getCurrentVersion(): string
-    {
-        if (defined('DOL_VERSION')) {
-            return DOL_VERSION;
-        }
-
-        $versionFile = DOL_DOCUMENT_ROOT . '/core/lib/version.lib.php';
-        if (file_exists($versionFile)) {
-            include_once $versionFile;
-            if (defined('DOL_VERSION')) {
-                return DOL_VERSION;
-            }
-        }
-
-        return 'unknown';
-    }
-
     private function checkForUpgrades(string $currentVersion): void
     {
         $this->info("Checking for available upgrades...\n");
 
-        $latestMinor = $this->getLatestMinorVersion($currentVersion);
-        if ($latestMinor && version_compare($latestMinor, $currentVersion, '>')) {
-            $this->success("Minor upgrade available: $latestMinor");
+        $versions = $this->fetchAvailableVersions();
+        if ([] === $versions) {
+            $this->fail('Could not fetch versions from dolibarr.org: '.Http::lastError());
+
+            return;
+        }
+
+        $latestMinor = $this->getLatestMinorVersion($currentVersion, $versions);
+        if (null !== $latestMinor && version_compare($latestMinor, $currentVersion, '>')) {
+            $this->success("Minor upgrade available: {$latestMinor}");
             $this->info("Run: ./dolibarr system upgrade --minor\n");
         } else {
             $this->info("No minor upgrades available for current major version.\n");
         }
 
-        $latestMajor = $this->getLatestMajorVersion();
-        if ($latestMajor && version_compare($latestMajor, $currentVersion, '>')) {
-            $this->success("Major upgrade available: $latestMajor");
+        $latestMajor = $this->getLatestMajorVersion($versions);
+        if (null !== $latestMajor && version_compare($latestMajor, $currentVersion, '>')) {
+            $this->success("Major upgrade available: {$latestMajor}");
             $this->info("Run: ./dolibarr system upgrade --major\n");
         }
     }
@@ -182,295 +181,600 @@ WARNING:
         $this->info("Fetching available versions from dolibarr.org...\n");
 
         $versions = $this->fetchAvailableVersions();
+        if ([] === $versions) {
+            $this->fail('Could not fetch versions from dolibarr.org: '.Http::lastError());
 
-        if (empty($versions)) {
-            $this->error("Could not fetch versions from dolibarr.org");
             return;
         }
 
         $this->rawOutput("Available Dolibarr versions:\n");
-        $this->rawOutput("─────────────────────────\n");
-
-        $recentVersions = array_slice($versions, -20);
-        foreach (array_reverse($recentVersions) as $version) {
-            $this->rawOutput("  • " . $version . "\n");
+        $this->rawOutput("----------------------------\n");
+        foreach (array_reverse(array_slice($versions, -20)) as $version) {
+            $this->rawOutput('  * '.$version."\n");
         }
     }
 
-    private function getLatestMinorVersion(string $currentVersion): ?string
+    /**
+     * @param  array<int, string>|null  $versions
+     */
+    private function getLatestMinorVersion(string $currentVersion, ?array $versions = null): ?string
     {
-        preg_match('/^(\d+\.\d+)/', $currentVersion, $matches);
-        if (!$matches) {
-            return null;
-        }
+        $versions ??= $this->fetchAvailableVersions();
+        $sameBranch = array_values(array_filter(
+            $versions,
+            static fn (string $v): bool => MigrationPlanner::sameBranch($v, $currentVersion)
+        ));
 
-        $majorMinor = $matches[1];
-        $versions = $this->fetchAvailableVersions();
-
-        $minorVersions = array_filter($versions, function ($v) use ($majorMinor) {
-            return strpos($v, $majorMinor) === 0;
-        });
-
-        if (empty($minorVersions)) {
-            return null;
-        }
-
-        usort($minorVersions, 'version_compare');
-        return end($minorVersions);
+        return [] === $sameBranch ? null : end($sameBranch);
     }
 
-    private function getLatestMajorVersion(): ?string
+    /**
+     * @param  array<int, string>|null  $versions
+     */
+    private function getLatestMajorVersion(?array $versions = null): ?string
     {
-        $versions = $this->fetchAvailableVersions();
+        $versions ??= $this->fetchAvailableVersions();
 
-        if (empty($versions)) {
-            return null;
-        }
-
-        usort($versions, 'version_compare');
-        return end($versions);
+        return [] === $versions ? null : end($versions);
     }
 
+    /**
+     * @return array<int, string> Published versions, sorted ascending
+     */
     private function fetchAvailableVersions(): array
     {
-        $html = @file_get_contents(self::DOLIBARR_VERSIONS_URL);
-        if (!$html) {
+        $html = Http::get(self::VERSIONS_URL);
+        if (null === $html) {
             return [];
         }
 
-        $versions = [];
-        preg_match_all('/dolibarr-(\d+\.\d+\.\d+)\.(tgz|zip)/', $html, $matches);
-
-        if (!empty($matches[1])) {
-            $versions = array_unique($matches[1]);
-            usort($versions, 'version_compare');
-        }
+        preg_match_all('/dolibarr-(\d+\.\d+\.\d+)\.(?:tgz|zip)/', $html, $matches);
+        $versions = array_values(array_unique($matches[1]));
+        usort($versions, 'version_compare');
 
         return $versions;
     }
 
     // ==================== FULL UPGRADE ====================
 
-    private function performFullUpgrade(string $toVersion): bool
+    private function performFullUpgrade(string $toVersion): void
     {
-        global $conf;
+        $fromVersion = DOL_VERSION;
+        $useLocalSource = $this->hasOption('source');
 
-        $fromVersion = $this->getCurrentVersion();
-        $useLocalSource = $this->hasParamFlex('source');
-        $skipBackup = $this->hasFlag('skip-backup');
-        $nonInteractive = $this->hasFlag('yes');
+        $this->rawOutput("\n=== DOLIBARR FULL UPGRADE ===\n\n");
+        $this->info("Current version: {$fromVersion}");
+        $this->info("Target version:  {$toVersion}");
 
-        $this->rawOutput("\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-        $this->rawOutput("  DOLIBARR FULL UPGRADE\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
+        if (version_compare($toVersion, MigrationPlanner::clean($fromVersion), '<=')) {
+            $this->info("Target version ({$toVersion}) is not newer than current version ({$fromVersion}): no upgrade needed.");
 
-        $this->info("Current version: $fromVersion");
-        $this->info("Target version:  $toVersion");
-        if ($useLocalSource) {
-            $this->info("Source:          " . $this->getParamFlex('source') . " (local)");
-        }
-        $this->rawOutput("\n");
-
-        if (version_compare($toVersion, $fromVersion, '<=')) {
-            $this->info("Target version ($toVersion) is not newer than current version ($fromVersion)");
-            $this->info("No upgrade needed.");
-            return true;
+            return;
         }
 
-        // Resolve and validate local source up-front (fail fast before any destructive op)
+        // Validate everything that can be validated before any destructive operation.
         $resolvedSource = null;
         if ($useLocalSource) {
-            $resolvedSource = $this->resolveLocalSource($this->getParamFlex('source'));
-            if (!$resolvedSource) {
-                $this->error("Invalid --source path: " . $this->getParamFlex('source'));
-                $this->error("Expected either a Dolibarr htdocs/ directory or a directory containing htdocs/.");
-                return false;
+            $resolvedSource = $this->resolveLocalSource((string) $this->param('source'));
+            if (null === $resolvedSource) {
+                $this->fail('Invalid --source path: '.$this->param('source').' (expected a Dolibarr htdocs/ directory or a directory containing htdocs/).');
+
+                return;
             }
-            $this->info("Resolved source path: $resolvedSource");
+            $this->info("Source:          {$resolvedSource} (local)");
+        }
+        $backupParent = $this->backupParentDir();
+        if (null === $backupParent) {
+            return;
+        }
+        if ( ! $this->hasFlag('skip-backup') && ! $this->checkBackupSpace($backupParent)) {
+            return;
+        }
+        foreach (['rsync', 'cp'] as $tool) {
+            if (null === $this->findBinary($tool)) {
+                $this->fail("{$tool} not found in PATH.");
+
+                return;
+            }
         }
 
-        if (!$nonInteractive && !$this->confirmUpgrade($fromVersion, $toVersion)) {
-            $this->info("Upgrade cancelled by user.");
-            return false;
+        $this->rawOutput("\n");
+        if ( ! $this->confirm("Upgrade Dolibarr from {$fromVersion} to {$toVersion}?")) {
+            if (ExitStatus::SUCCESS === ExitStatus::get()) {
+                $this->info('Upgrade cancelled by user.');
+            }
+
+            return;
         }
 
-        if (!$skipBackup && !$nonInteractive) {
-            $this->rawOutput("\n");
-            $this->error("IMPORTANT: Have you backed up your database?");
-            $this->info("Recommended: mysqldump -u user -p dbname > backup_$(date +%Y%m%d_%H%M%S).sql");
-            $this->rawOutput("\nPress ENTER to continue or Ctrl+C to abort...");
-            fgets(STDIN);
-        }
-
-        // Capture original uid/gid of the install before any file operation, so we can
-        // restore them at the end. Needed when running as root: rsync would otherwise
-        // leave the new files owned by root, breaking the web user's access. Same goes
-        // for DOL_DATA_ROOT (documents/) since the DB migration writes log files there.
-        $ownership = $this->captureOwnership(DOL_DOCUMENT_ROOT);
-        $dataOwnership = defined('DOL_DATA_ROOT')
-            ? $this->captureOwnership(DOL_DATA_ROOT)
-            : null;
-        if ($ownership) {
-            $this->info(sprintf(
-                "Detected install ownership: %s:%s (will be reapplied after copy)",
-                $ownership['user'],
-                $ownership['group']
-            ));
-        }
-        if ($dataOwnership && (!$ownership || $dataOwnership['uid'] !== $ownership['uid'] || $dataOwnership['gid'] !== $ownership['gid'])) {
-            $this->info(sprintf(
-                "Detected data dir ownership: %s:%s",
-                $dataOwnership['user'],
-                $dataOwnership['group']
-            ));
-        }
-
-        // Register a shutdown function so the chown is restored even if Dolibarr's
-        // install scripts call exit() (step5.php does -- it terminates the whole PHP
-        // process before we ever reach Step 6/6 here).
-        $this->pendingOwnership = $ownership;
-        $this->pendingDataOwnership = $dataOwnership;
-        register_shutdown_function([$this, 'runShutdownOwnershipRestore']);
+        $this->prepareOwnershipRestore();
+        register_shutdown_function([$this, 'runShutdownCleanup']);
 
         $backupPath = null;
-        $archivePath = null;
-        $extractPath = null;
 
         try {
-            $this->rawOutput("\n");
-            $this->info("Starting full upgrade process...\n");
+            $this->workDir = $this->createWorkDir();
 
-            // Step 1: Download (skipped if --source provided)
+            // Step 1: get the new files
             if ($useLocalSource) {
-                $this->rawOutput("Step 1/6: Skipping download (using local --source)\n");
+                $this->rawOutput("Step 1/6: Using local source {$resolvedSource}\n");
+                $sourcePath = (string) $resolvedSource;
             } else {
-                $this->rawOutput("Step 1/6: Downloading Dolibarr $toVersion...\n");
-                $archivePath = $this->downloadVersion($toVersion);
-                if (!$archivePath) {
-                    throw new \Exception("Download failed");
-                }
-                $this->success("Download completed\n");
+                $this->rawOutput("Step 1/6: Downloading Dolibarr {$toVersion}...\n");
+                $sourcePath = $this->downloadAndExtract($toVersion);
             }
 
-            // Step 2: Backup (skipped if --skip-backup)
-            if ($skipBackup) {
-                $this->rawOutput("Step 2/6: Skipping file backup (--skip-backup)\n");
+            // Step 2: check them against the official signature
+            if ($this->hasFlag('skip-verify')) {
+                $this->rawOutput("Step 2/6: Skipping signature check (--skip-verify)\n");
             } else {
-                $this->rawOutput("Step 2/6: Backing up current installation...\n");
-                $backupPath = $this->backupCurrentInstallation($fromVersion);
-                $this->success("Backup created: $backupPath\n");
+                $this->rawOutput("Step 2/6: Checking files against the official signature...\n");
+                $this->verifySignature($sourcePath, $toVersion);
+                $this->success("Files match the official signature of {$toVersion}\n");
             }
 
-            // Step 3: Extract (skipped if --source provided)
-            if ($useLocalSource) {
-                $this->rawOutput("Step 3/6: Skipping extract (using local --source)\n");
-                $sourcePath = $resolvedSource;
+            // Step 3: backup
+            if ($this->hasFlag('skip-backup')) {
+                $this->rawOutput("Step 3/6: Skipping backup (--skip-backup)\n");
             } else {
-                $this->rawOutput("Step 3/6: Extracting archive...\n");
-                $extractPath = $this->extractArchive($archivePath, $toVersion);
-                if (!$extractPath) {
-                    throw new \Exception("Extraction failed");
-                }
-                $this->success("Archive extracted\n");
-                $sourcePath = $extractPath . '/htdocs';
-                if (!is_dir($sourcePath)) {
-                    // Fallback for older archives where htdocs/ is the root
-                    $sourcePath = $extractPath;
-                }
+                $this->rawOutput("Step 3/6: Backing up current installation and database...\n");
+                $backupPath = $this->backupInstallation($backupParent, $fromVersion);
+                $this->success("Backup created: {$backupPath}\n");
             }
 
-            // Step 4: Copy files
+            // Step 4: copy
             $this->rawOutput("Step 4/6: Copying new files...\n");
             $this->copyNewFiles($sourcePath);
             $this->success("Files copied\n");
 
-            // Step 5: Database migration
+            // Step 5: database
             $this->rawOutput("Step 5/6: Running database migration...\n");
-            $this->migrationFromVersion = $fromVersion;
-            $this->migrationToVersion = $toVersion;
-            $migrationOk = $this->performDatabaseMigration();
-            if (!$migrationOk) {
-                throw new \Exception("Database migration failed");
+            if ( ! $this->migrateDatabase($toVersion, $this->lastUpgradeVersion())) {
+                throw new \RuntimeException('Database migration failed');
             }
-            $this->success("Database migrated\n");
 
-            // Step 6: Cleanup (only what we created)
+            // Step 6: cleanup
             $this->rawOutput("Step 6/6: Cleaning up temporary files...\n");
-            if (!$useLocalSource) {
-                $this->cleanup($archivePath, $extractPath);
-            }
-            $this->success("Cleanup completed\n");
-
-            // Restore ownership here on the happy path. The shutdown function will
-            // also try (idempotent via $ownershipRestorationDone flag) -- but most of
-            // the time Dolibarr's exit() inside step5.php means we never reach this
-            // line and only the shutdown hook actually runs.
+            $this->removeWorkDir();
             $this->doOwnershipRestore();
 
             $this->rawOutput("\n");
-            $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-            $this->success("Upgrade completed successfully!");
-            $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-            $this->info("Dolibarr has been upgraded from $fromVersion to $toVersion\n");
-            return true;
-        } catch (\Exception $e) {
-            $this->error("\nUpgrade failed: " . $e->getMessage());
-            $this->error("Your backup is available at: " . ($backupPath ?? 'not created'));
-            $this->info("You may need to restore manually.");
-            // Try to restore ownership even on failure, so the user can troubleshoot
-            // without further root intervention.
+            $this->success('Upgrade completed successfully!');
+            $this->info("Dolibarr has been upgraded from {$fromVersion} to {$toVersion}\n");
+        } catch (Throwable $e) {
+            $this->fail('Upgrade failed: '.$e->getMessage());
+            if (null !== $backupPath) {
+                $this->info("Backup of files and database: {$backupPath} (restore it manually if needed).");
+            }
+            $this->removeWorkDir();
             $this->doOwnershipRestore();
-            return false;
         }
     }
 
-    /**
-     * Shutdown hook: PHP guarantees this runs even after exit() or fatal errors.
-     * Idempotent: a normal end-of-method call to doOwnershipRestore() will mark the
-     * job done, and this no-ops.
-     */
-    public function runShutdownOwnershipRestore(): void
+    private function downloadAndExtract(string $version): string
     {
+        $workDir = (string) $this->workDir;
+
+        foreach (['tgz', 'zip'] as $ext) {
+            $url = sprintf(self::DOWNLOAD_URL, $version, $ext);
+            $archive = $workDir."/dolibarr-{$version}.{$ext}";
+            $this->info("Downloading from: {$url}");
+            if ( ! Http::download($url, $archive)) {
+                $this->info('  not available: '.Http::lastError());
+
+                continue;
+            }
+            $this->success('Downloaded ('.round((int) filesize($archive) / 1048576, 1).' MB)');
+
+            $extractDir = $workDir.'/extracted';
+            mkdir($extractDir, 0700);
+            $command = 'tgz' === $ext
+                ? ['tar', '-xzf', $archive, '-C', $extractDir]
+                : ['unzip', '-q', $archive, '-d', $extractDir];
+            $this->runTool($command, 'Extraction failed');
+
+            foreach ([$extractDir."/dolibarr-{$version}/htdocs", $extractDir.'/htdocs', $extractDir."/dolibarr-{$version}"] as $candidate) {
+                if (is_file($candidate.'/main.inc.php')) {
+                    return $candidate;
+                }
+            }
+
+            throw new \RuntimeException("No htdocs/ directory found in the archive of {$version}");
+        }
+
+        throw new \RuntimeException("Download of Dolibarr {$version} failed: ".Http::lastError());
+    }
+
+    private function verifySignature(string $sourcePath, string $version): void
+    {
+        $url = sprintf(FileSignature::REMOTE_URL, $version);
+        $xml = Http::get($url, 60);
+        if (null === $xml) {
+            throw new \RuntimeException("Cannot download the official signature {$url}: ".Http::lastError().' (use --skip-verify to bypass)');
+        }
+        $root = FileSignature::parse($xml);
+        if (null === $root) {
+            throw new \RuntimeException("Invalid signature file {$url}");
+        }
+
+        $result = FileSignature::compare($root, $sourcePath);
+        $problems = array_merge(
+            array_map(static fn (array $f): string => 'missing  '.$f['filename'], $result['missing']),
+            array_map(static fn (array $f): string => 'modified '.$f['filename'], $result['updated'])
+        );
+        if ([] !== $problems) {
+            foreach (array_slice($problems, 0, 20) as $line) {
+                $this->error('  '.$line);
+            }
+            if (count($problems) > 20) {
+                $this->error('  ... and '.(count($problems) - 20).' more');
+            }
+
+            throw new \RuntimeException(count($problems)." file(s) differ from the official signature of {$version}: upgrade aborted, nothing was changed");
+        }
+    }
+
+    private function backupParentDir(): ?string
+    {
+        $dir = rtrim($this->param('backup-dir') ?? dirname(DOL_DOCUMENT_ROOT), '/');
+        if ($this->hasFlag('skip-backup')) {
+            return $dir;
+        }
+        if ( ! is_dir($dir) || ! is_writable($dir)) {
+            $this->fail("Backup directory is not writable: {$dir} (use backup-dir=PATH or --skip-backup).");
+
+            return null;
+        }
+
+        return $dir;
+    }
+
+    private function checkBackupSpace(string $dir): bool
+    {
+        $needed = (int) ($this->directorySize(DOL_DOCUMENT_ROOT) * 1.1);
+        $free = disk_free_space($dir);
+        if (false !== $free && $free < $needed) {
+            $this->fail(sprintf(
+                'Not enough disk space in %s for the backup: %d MB needed, %d MB free (use backup-dir=PATH or --skip-backup).',
+                $dir,
+                (int) ($needed / 1048576),
+                (int) ($free / 1048576)
+            ));
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private function backupInstallation(string $parent, string $version): string
+    {
+        $backupDir = $parent.'/dolibarr_backup_'.$version.'_'.date('Ymd_His');
+        if ( ! mkdir($backupDir, 0700)) {
+            throw new \RuntimeException("Cannot create backup directory {$backupDir}");
+        }
+
+        $this->runTool(['cp', '-a', DOL_DOCUMENT_ROOT, $backupDir.'/htdocs'], 'File backup failed');
+
+        $backup = new DatabaseBackup();
+        if ( ! $backup->dumpDatabase($backupDir.'/database.sql')) {
+            throw new \RuntimeException('Database backup failed: '.$backup->getLastError());
+        }
+
+        $this->rotateBackups($parent, $backupDir);
+
+        return $backupDir;
+    }
+
+    /**
+     * Keep only the N most recent dolicli backups when keep-backups=N is given.
+     */
+    private function rotateBackups(string $parent, string $current): void
+    {
+        $keep = $this->param('keep-backups');
+        if (null === $keep) {
+            return;
+        }
+        $keep = max(1, (int) $keep);
+
+        $all = array_values(array_filter(
+            (array) glob($parent.'/dolibarr_backup_*', GLOB_ONLYDIR),
+            static fn ($d): bool => is_string($d) && 1 === preg_match('/\/dolibarr_backup_[0-9.]+_\d{8}_\d{6}$/', $d)
+        ));
+        usort($all, static fn (string $a, string $b): int => mb_substr($b, -15) <=> mb_substr($a, -15));
+
+        foreach (array_slice($all, $keep) as $old) {
+            if ($old === $current) {
+                continue;
+            }
+            $this->info("Removing old backup {$old} (keep-backups={$keep})");
+            $this->runTool(['rm', '-rf', '--', $old], "Cannot remove old backup {$old}");
+        }
+    }
+
+    private function copyNewFiles(string $sourcePath): void
+    {
+        $this->runTool(
+            ['rsync', '-a', '--exclude=/documents', '--exclude=/conf/conf.php', '--exclude=/custom', rtrim($sourcePath, '/').'/', DOL_DOCUMENT_ROOT.'/'],
+            'File copy failed'
+        );
+    }
+
+    // ==================== DATABASE MIGRATION ====================
+
+    private function performDatabaseOnlyMigration(): void
+    {
+        $this->rawOutput("\n=== DATABASE MIGRATION ===\n\n");
+
+        $from = $this->lastUpgradeVersion();
+        if (null === $from) {
+            return;
+        }
+
+        if ( ! $this->hasFlag('skip-backup')) {
+            $parent = $this->backupParentDir();
+            if (null === $parent) {
+                return;
+            }
+            $file = $parent.'/dolibarr_backup_db_'.MigrationPlanner::clean($from).'_'.date('Ymd_His').'.sql';
+            $this->info('Dumping database to '.$file.' ...');
+            $backup = new DatabaseBackup();
+            if ( ! $backup->dumpDatabase($file)) {
+                $this->fail('Database backup failed: '.$backup->getLastError().' (use --skip-backup to bypass)');
+
+                return;
+            }
+            $this->success('Database dumped');
+        }
+
+        register_shutdown_function([$this, 'runShutdownCleanup']);
+        $this->migrateDatabase(DOL_VERSION, $from);
+    }
+
+    /**
+     * Version the database was last migrated to: from=X.Y.Z, else MAIN_VERSION_LAST_UPGRADE,
+     * else MAIN_VERSION_LAST_INSTALL.
+     */
+    private function lastUpgradeVersion(): ?string
+    {
+        $from = $this->param('from')
+            ?? (DolibarrHelper::conf('MAIN_VERSION_LAST_UPGRADE') ?: DolibarrHelper::conf('MAIN_VERSION_LAST_INSTALL'));
+        if ( ! MigrationPlanner::isVersion((string) $from)) {
+            $this->fail('Cannot tell which version the database comes from (MAIN_VERSION_LAST_UPGRADE is empty): give it with from=X.Y.Z.');
+
+            return null;
+        }
+
+        return MigrationPlanner::clean((string) $from);
+    }
+
+    private function migrateDatabase(string $targetVersion, string $fromVersion): bool
+    {
+        global $db, $conf;
+
+        $installDir = DOL_DOCUMENT_ROOT.'/install';
+        foreach (['upgrade.php', 'upgrade2.php', 'step5.php'] as $script) {
+            if ( ! is_file($installDir.'/'.$script)) {
+                $this->fail("Upgrade file not found: {$installDir}/{$script}");
+
+                return false;
+            }
+        }
+
+        $steps = MigrationPlanner::plan(
+            MigrationPlanner::migrationFiles($installDir.'/mysql/migration'),
+            $fromVersion,
+            $targetVersion,
+            $this->hasFlag('force')
+        );
+        if ([] === $steps) {
+            $this->success("Database is already at version {$fromVersion}: nothing to migrate (use --force to run it again).");
+
+            return true;
+        }
+
+        $this->info("Database version: {$fromVersion}, files version: {$targetVersion}");
+        $this->info('Migration plan:');
+        foreach ($steps as $step) {
+            $this->rawOutput("  * {$step['from']} -> {$step['to']}\n");
+        }
+        $this->rawOutput("\n");
+
+        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+        if ( ! $this->enableMaintenance('Temporary maintenance for upgrade')) {
+            return false;
+        }
+
+        $this->installLock = InstallLock::forCurrentInstall();
+        $this->installLock->open();
+
+        $runner = new InstallScriptRunner(fn (string $text) => $this->rawOutput($text));
+        $ok = false;
+
+        try {
+            $total = count($steps);
+            foreach ($steps as $i => $step) {
+                $n = $i + 1;
+                $this->rawOutput("Step {$n}/{$total}: SQL migration {$step['from']} -> {$step['to']}\n");
+                $args = [$step['from'], $step['to']];
+                if ($this->hasFlag('force')) {
+                    $args[] = 'ignoredbversion';
+                }
+                if (0 !== $runner->run($installDir, 'upgrade.php', $args)) {
+                    $this->reportScriptFailure('upgrade.php', $runner);
+
+                    return false;
+                }
+
+                $this->rawOutput("Step {$n}/{$total}: data migration {$step['from']} -> {$step['to']}\n");
+                if (0 !== $runner->run($installDir, 'upgrade2.php', [$step['from'], $step['to']])) {
+                    $this->reportScriptFailure('upgrade2.php', $runner);
+
+                    return false;
+                }
+            }
+
+            // action must be 'upgrade' (not 'set', which is for fresh installs and does not update
+            // MAIN_VERSION_LAST_UPGRADE); installlock=1 makes step5 create install.lock.
+            $this->rawOutput("Finalizing migration...\n");
+            $lang = DolibarrHelper::conf('MAIN_LANG_DEFAULT', 'en_US');
+            if ('auto' === $lang) {
+                $lang = 'en_US';
+            }
+            if (0 !== $runner->run($installDir, 'step5.php', [$steps[0]['from'], $targetVersion, $lang, 'upgrade', '', '', '', '1'])) {
+                $this->reportScriptFailure('step5.php', $runner);
+
+                return false;
+            }
+
+            $this->success('Database migration completed successfully!');
+            $ok = true;
+        } catch (Throwable $e) {
+            $this->fail('Exception during migration: '.$e->getMessage().'. Database may be in an inconsistent state: restore from backup.');
+        } finally {
+            $this->installLock->close();
+            $this->disableMaintenance();
+        }
+
+        return $ok;
+    }
+
+    private function reportScriptFailure(string $script, InstallScriptRunner $runner): void
+    {
+        $stderr = trim($runner->getStderr());
+        if ('' !== $stderr) {
+            $this->error("[{$script} stderr]\n".$stderr);
+        }
+        $this->fail("{$script} failed: the database may be in an inconsistent state, check it or restore the backup.");
+    }
+
+    private function enableMaintenance(string $note): bool
+    {
+        global $db, $conf;
+
+        if ( ! empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED)) {
+            return true;
+        }
+
+        $login = DolibarrHelper::findFirstSuperAdmin();
+        if (null === $login) {
+            $this->fail('No super admin user found: cannot enable maintenance mode.');
+
+            return false;
+        }
+
+        $this->info("Enabling maintenance mode (user: {$login})...");
+        if (dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $login, 'chaine', 0, $note, $conf->entity) <= 0) {
+            $this->fail('Cannot enable maintenance mode: '.$db->lasterror());
+
+            return false;
+        }
+        $conf->global->MAIN_ONLY_LOGIN_ALLOWED = $login;
+        $this->maintenanceEnabledByUs = true;
+
+        return true;
+    }
+
+    private function disableMaintenance(): void
+    {
+        global $db, $conf;
+
+        if ( ! $this->maintenanceEnabledByUs) {
+            return;
+        }
+        $this->maintenanceEnabledByUs = false;
+        $this->info('Disabling maintenance mode...');
+        if (dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity) < 0) {
+            $this->fail('Cannot disable maintenance mode: run ./dolibarr system maintenance disable');
+        }
+        unset($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
+    }
+
+    // ==================== CLEANUP, OWNERSHIP ====================
+
+    /**
+     * Shutdown hook: runs even after exit() or a fatal error, so the install is never left
+     * unlocked, in maintenance, or owned by root. Every step is idempotent.
+     */
+    public function runShutdownCleanup(): void
+    {
+        $this->installLock?->close();
+        $this->disableMaintenance();
+        $this->removeWorkDir();
         $this->doOwnershipRestore();
+    }
+
+    private function createWorkDir(): string
+    {
+        $dir = sys_get_temp_dir().'/dolicli-upgrade-'.bin2hex(random_bytes(8));
+        if ( ! mkdir($dir, 0700)) {
+            throw new \RuntimeException("Cannot create working directory {$dir}");
+        }
+
+        return $dir;
+    }
+
+    private function removeWorkDir(): void
+    {
+        if (null === $this->workDir) {
+            return;
+        }
+        $dir = $this->workDir;
+        $this->workDir = null;
+        if (is_dir($dir)) {
+            $this->runTool(['rm', '-rf', '--', $dir], "Cannot remove {$dir}", false);
+        }
+    }
+
+    private function prepareOwnershipRestore(): void
+    {
+        $this->pendingOwnership = $this->captureOwnership(DOL_DOCUMENT_ROOT);
+        $this->pendingDataOwnership = $this->captureOwnership(DOL_DATA_ROOT);
+
+        if (null !== $this->pendingOwnership) {
+            $this->info(sprintf('Detected install ownership: %s:%s (will be reapplied after copy)', $this->pendingOwnership['user'], $this->pendingOwnership['group']));
+        }
+
+        // Files of documents/ created from now on (install logs, install.lock, migrated files)
+        // get the owner of documents/ back at the end. Existing files are not touched.
+        $marker = tempnam(sys_get_temp_dir(), 'dolicli-start');
+        if (false !== $marker) {
+            touch($marker, time() - 1);
+            $this->startMarker = $marker;
+        }
     }
 
     private function doOwnershipRestore(): void
     {
-        if ($this->ownershipRestorationDone) {
+        if ($this->ownershipRestorationDone || (null === $this->pendingOwnership && null === $this->pendingDataOwnership)) {
             return;
         }
         $this->ownershipRestorationDone = true;
 
-        if ($this->pendingOwnership) {
-            $this->restoreOwnership(DOL_DOCUMENT_ROOT, $this->pendingOwnership);
+        if (null !== $this->pendingOwnership) {
+            $this->restoreOwnership(DOL_DOCUMENT_ROOT, $this->pendingOwnership, null);
         }
-        if ($this->pendingDataOwnership && defined('DOL_DATA_ROOT')) {
-            $this->restoreOwnership(DOL_DATA_ROOT, $this->pendingDataOwnership);
+        if (null !== $this->pendingDataOwnership) {
+            $this->restoreOwnership(DOL_DATA_ROOT, $this->pendingDataOwnership, $this->startMarker);
+        }
+        if (null !== $this->startMarker && is_file($this->startMarker)) {
+            unlink($this->startMarker);
         }
     }
 
     /**
-     * Read uid/gid from a reference file inside the install. Returns null if we can't
-     * determine ownership (path missing, stat fails). Prefer main.inc.php since it's
-     * mandatory and owned by the same user as the rest of the install.
-     *
-     * @return array{uid:int,gid:int,user:string,group:string}|null
+     * @return array{uid: int, gid: int, user: string, group: string}|null
      */
     private function captureOwnership(string $path): ?array
     {
-        $reference = $path . '/main.inc.php';
-        if (!file_exists($reference)) {
-            // Fallback to the directory itself
-            $reference = $path;
-            if (!file_exists($reference)) {
-                return null;
-            }
+        $reference = is_file($path.'/main.inc.php') ? $path.'/main.inc.php' : $path;
+        if ( ! file_exists($reference)) {
+            return null;
         }
 
         $uid = @fileowner($reference);
         $gid = @filegroup($reference);
-        if ($uid === false || $gid === false) {
+        if (false === $uid || false === $gid) {
             return null;
         }
 
@@ -486,542 +790,139 @@ WARNING:
     }
 
     /**
-     * Recursive chown to restore uid/gid on the install. Silently no-op if we are not
-     * running as root and the current uid already matches the target uid (nothing to do).
+     * Give files back to their owner when running as root. With $newerThan, only files
+     * modified after that marker file are changed.
      *
-     * @param array{uid:int,gid:int,user:string,group:string} $ownership
+     * @param  array{uid: int, gid: int, user: string, group: string}  $ownership
      */
-    private function restoreOwnership(string $path, array $ownership): void
+    private function restoreOwnership(string $path, array $ownership, ?string $newerThan): void
     {
         $currentUid = function_exists('posix_geteuid') ? posix_geteuid() : -1;
-
-        // If we are already running as the target user, no chown needed.
         if ($currentUid === $ownership['uid']) {
             return;
         }
-
-        // Only root can change ownership to an arbitrary uid. If we're not root and the
-        // uids differ, chown will fail -- log it but don't crash.
-        if ($currentUid !== 0 && $currentUid !== -1) {
+        if (0 !== $currentUid) {
             $this->error(sprintf(
-                "Cannot restore ownership to uid=%d (running as uid=%d, not root). Files may be owned by the wrong user.",
+                'Cannot restore ownership of %s to uid=%d (running as uid=%d, not root): files may be owned by the wrong user.',
+                $path,
                 $ownership['uid'],
                 $currentUid
             ));
+            DolibarrHelper::log("upgrade: cannot restore ownership of {$path}", LOG_WARNING);
+
             return;
         }
 
-        $this->info(sprintf(
-            "Restoring ownership to %s:%s on %s...",
-            $ownership['user'],
-            $ownership['group'],
-            $path
-        ));
+        $this->info(sprintf('Restoring ownership to %s:%s on %s...', $ownership['user'], $ownership['group'], $path));
 
-        // Use `find ... -exec chown ...` instead of `chown -R` so a single protected
-        // file (immutable attr, etc.) doesn't abort the whole recursion. We tolerate
-        // partial failures and report them as warnings rather than blocking errors.
-        $command = sprintf(
-            'find %s -exec chown %d:%d {} + 2>&1',
-            escapeshellarg($path),
-            $ownership['uid'],
-            $ownership['gid']
-        );
+        // find -exec chown instead of chown -R: one protected file (chattr +i) does not stop the rest.
+        $command = ['find', $path];
+        if (null !== $newerThan && is_file($newerThan)) {
+            $command[] = '-newer';
+            $command[] = $newerThan;
+        }
+        $command = array_merge($command, ['-exec', 'chown', $ownership['uid'].':'.$ownership['gid'], '{}', '+']);
 
-        exec($command, $output, $returnCode);
-        $failures = array_filter($output, fn($line) => stripos($line, 'chown:') !== false);
+        $descriptors = [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open($command, $descriptors, $pipes);
+        if ( ! is_resource($process)) {
+            $this->error('Cannot run find/chown to restore ownership.');
 
-        if (!empty($failures)) {
-            $this->info(sprintf(
-                "Ownership restored with %d file(s) skipped (likely protected by chattr/immutable):",
-                count($failures)
-            ));
+            return;
+        }
+        stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+
+        $failures = array_values(array_filter(explode("\n", $stderr), static fn (string $l): bool => str_contains($l, 'chown')));
+        if ([] !== $failures) {
+            $this->info(sprintf('Ownership restored with %d file(s) skipped (likely protected by chattr/immutable):', count($failures)));
             foreach (array_slice($failures, 0, 5) as $line) {
-                $this->info("  $line");
+                $this->info("  {$line}");
             }
-            if (count($failures) > 5) {
-                $this->info(sprintf("  ... and %d more", count($failures) - 5));
-            }
+
             return;
         }
 
-        $this->success("Ownership restored.");
+        $this->success('Ownership restored.');
     }
 
+    // ==================== HELPERS ====================
+
     /**
-     * Resolve a --source path to the directory that should be rsync'd into DOL_DOCUMENT_ROOT.
-     * Accepts either an htdocs/ directory directly, or a parent that contains htdocs/.
-     *
-     * @return string|null Absolute resolved path, or null if invalid.
+     * Resolve a --source path to the htdocs/ directory to copy into DOL_DOCUMENT_ROOT.
      */
     private function resolveLocalSource(string $path): ?string
     {
         $real = realpath($path);
-        if (!$real || !is_dir($real)) {
+        if (false === $real || ! is_dir($real)) {
             return null;
         }
-
-        // Case A: path itself contains main.inc.php -> it IS the htdocs/
-        if (file_exists($real . '/main.inc.php')) {
+        if (is_file($real.'/main.inc.php')) {
             return $real;
         }
-
-        // Case B: path contains htdocs/main.inc.php -> use the htdocs/ subdir
-        if (file_exists($real . '/htdocs/main.inc.php')) {
-            return $real . '/htdocs';
+        if (is_file($real.'/htdocs/main.inc.php')) {
+            return $real.'/htdocs';
         }
 
         return null;
     }
 
-    private function confirmUpgrade(string $from, string $to): bool
+    /**
+     * Run an external tool (argument array, no shell); throws on failure unless $throw is false.
+     *
+     * @param  array<int, string>  $command
+     */
+    private function runTool(array $command, string $errorMessage, bool $throw = true): bool
     {
-        $this->rawOutput("\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-        $this->rawOutput("  UPGRADE CONFIRMATION\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-        $this->rawOutput("  From: $from\n");
-        $this->rawOutput("  To:   $to\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
+        $descriptors = [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open($command, $descriptors, $pipes);
+        if ( ! is_resource($process)) {
+            $message = $errorMessage.': cannot start '.$command[0];
+        } else {
+            stream_get_contents($pipes[1]);
+            $stderr = trim((string) stream_get_contents($pipes[2]));
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $code = proc_close($process);
+            if (0 === $code) {
+                return true;
+            }
+            $message = "{$errorMessage}: {$command[0]} exited with code {$code}".('' !== $stderr ? " ({$stderr})" : '');
+        }
 
-        $this->info("Do you want to proceed with this upgrade? (yes/no)");
-        $this->rawOutput("Answer: ");
+        DolibarrHelper::log('upgrade: '.$message, LOG_ERR);
+        if ($throw) {
+            throw new \RuntimeException($message);
+        }
+        $this->error($message);
 
-        $answer = trim(fgets(STDIN));
-        return in_array(strtolower($answer), ['yes', 'y', 'oui', 'o']);
+        return false;
     }
 
-    private function downloadVersion(string $version): ?string
+    private function findBinary(string $name): ?string
     {
-        $extensions = ['tgz', 'zip'];
-
-        foreach ($extensions as $ext) {
-            $filename = "dolibarr-$version.$ext";
-            $url = self::DOLIBARR_DOWNLOAD_URL . "/$filename";
-            $archivePath = self::TEMP_DIR . "/$filename";
-
-            if (!is_dir(self::TEMP_DIR)) {
-                mkdir(self::TEMP_DIR, 0755, true);
-            }
-
-            $this->info("Downloading from: $url");
-
-            $command = sprintf(
-                'curl -L -o %s %s 2>&1',
-                escapeshellarg($archivePath),
-                escapeshellarg($url)
-            );
-
-            exec($command, $output, $returnCode);
-
-            if ($returnCode === 0 && file_exists($archivePath) && filesize($archivePath) > 0) {
-                $this->info("Downloaded: " . $this->formatFileSize(filesize($archivePath)));
-                return $archivePath;
-            }
-
-            if (file_exists($archivePath)) {
-                unlink($archivePath);
+        foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $dir) {
+            if ('' !== $dir && is_executable($dir.'/'.$name)) {
+                return $dir.'/'.$name;
             }
         }
 
         return null;
     }
 
-    private function formatFileSize(int $bytes): string
+    private function directorySize(string $path): int
     {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $power = $bytes > 0 ? floor(log($bytes, 1024)) : 0;
-        return number_format($bytes / pow(1024, $power), 2) . ' ' . $units[$power];
-    }
-
-    private function backupCurrentInstallation(string $version): string
-    {
-        $backupDir = dirname(DOL_DOCUMENT_ROOT) . '/dolibarr_backup_' . $version . '_' . date('Ymd_His');
-
-        $command = sprintf(
-            'cp -r %s %s',
-            escapeshellarg(DOL_DOCUMENT_ROOT),
-            escapeshellarg($backupDir)
-        );
-
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            throw new \Exception("Backup failed");
-        }
-
-        return $backupDir;
-    }
-
-    private function extractArchive(string $archivePath, string $version): ?string
-    {
-        $extractPath = self::TEMP_DIR . '/extracted';
-
-        if (!is_dir($extractPath)) {
-            mkdir($extractPath, 0755, true);
-        }
-
-        if (str_ends_with($archivePath, '.tgz') || str_ends_with($archivePath, '.tar.gz')) {
-            $command = sprintf(
-                'tar -xzf %s -C %s',
-                escapeshellarg($archivePath),
-                escapeshellarg($extractPath)
-            );
-        } elseif (str_ends_with($archivePath, '.zip')) {
-            $command = sprintf(
-                'unzip -q %s -d %s',
-                escapeshellarg($archivePath),
-                escapeshellarg($extractPath)
-            );
-        } else {
-            return null;
-        }
-
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            return null;
-        }
-
-        return $extractPath . '/dolibarr-' . $version;
-    }
-
-    private function copyNewFiles(string $sourcePath): void
-    {
-        $excludes = [
-            'documents',
-            'conf/conf.php',
-            'custom'
-        ];
-
-        $excludeArgs = '';
-        foreach ($excludes as $exclude) {
-            $excludeArgs .= ' --exclude=' . escapeshellarg($exclude);
-        }
-
-        $command = sprintf(
-            'rsync -av %s %s/ %s/',
-            $excludeArgs,
-            escapeshellarg($sourcePath),
-            escapeshellarg(DOL_DOCUMENT_ROOT)
-        );
-
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            throw new \Exception("File copy failed");
-        }
-    }
-
-    private function cleanup(string $archivePath, string $extractPath): void
-    {
-        if (file_exists($archivePath)) {
-            unlink($archivePath);
-        }
-
-        if (is_dir($extractPath)) {
-            $command = sprintf('rm -rf %s', escapeshellarg($extractPath));
-            exec($command);
-        }
-    }
-
-    // ==================== DATABASE MIGRATION ====================
-
-    private function performDatabaseMigration(): bool
-    {
-        global $db, $conf;
-
-        $success = false;
-
-        //erics
-        if (!defined('NOSESSION')) {
-            define('NOSESSION', '1');
-        }
-        chdir(DOL_DOCUMENT_ROOT . '/install/');
-
-        $this->rawOutput("\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-        $this->rawOutput("  DATABASE MIGRATION\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
-
-        if (!$this->validateUpgradeFiles()) {
-            return false;
-        }
-
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
-
-        $wasInMaintenanceMode = !empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
-        $maintenanceUser = null;
-
-        if (!$wasInMaintenanceMode) {
-            $maintenanceUser = DolibarrHelper::findFirstSuperAdmin();
-            if (!$maintenanceUser) {
-                $this->error("No super admin user found! Cannot enable maintenance mode.");
-                $this->info("Please ensure at least one active super admin exists.");
-                return false;
-            }
-
-            $this->info("Enabling maintenance mode (user: $maintenanceUser)...\n");
-            dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $maintenanceUser, 'chaine', 0, 'Temporary maintenance for upgrade', $conf->entity);
-            $conf->global->MAIN_ONLY_LOGIN_ALLOWED = $maintenanceUser;
-        }
-
-        try {
-            $this->rawOutput("Step 1/3: Checking version and preparing migration...\n");
-            $this->rawOutput("────────────────────────────────────────────────────────\n");
-            $this->lockUnlock(false);
-            $result1 = $this->executeUpgradeStep1();
-
-            if (!$result1) {
-                $this->error("\nMigration step 1 failed. Aborting process.");
-                $this->lockUnlock();
-                return false;
-            }
-
-            $this->rawOutput("\n");
-
-            $this->rawOutput("Step 2/3: Executing SQL migration scripts...\n");
-            $this->rawOutput("────────────────────────────────────────────────────────\n");
-            $result2 = $this->executeUpgradeStep2();
-
-            if (!$result2) {
-                $this->error("\nMigration step 2 failed. Database may be in inconsistent state!");
-                $this->error("Please check database manually or restore from backup.");
-                $this->lockUnlock();
-                return false;
-            }
-
-            $this->rawOutput("\n");
-
-            $this->rawOutput("Step 3/3: Finalizing migration...\n");
-            $this->rawOutput("────────────────────────────────────────────────────────\n");
-            $result3 = $this->executeUpgradeStep3();
-
-            if (!$result3) {
-                $this->error("\nMigration step 3 failed during finalization.");
-                $this->lockUnlock();
-                return false;
-            }
-
-            $this->rawOutput("\n");
-            $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-            $this->success("Database migration completed successfully!");
-            $this->rawOutput("═══════════════════════════════════════════════════════════\n");
-            $this->lockUnlock();
-            $success = true;
-        } catch (\Exception $e) {
-            $this->error("\nException during migration: " . $e->getMessage());
-            $this->error("Database may be in inconsistent state. Please restore from backup.");
-            $success = false;
-        } finally {
-            if (!$wasInMaintenanceMode) {
-                $this->rawOutput("\n");
-                $this->info("Disabling maintenance mode...");
-                dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity);
-                unset($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
+        $size = 0;
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $size += $file->getSize();
             }
         }
 
-        $this->rawOutput("\n");
-        return $success;
-    }
-
-    private function validateUpgradeFiles(): bool
-    {
-        $upgradeFile = DOL_DOCUMENT_ROOT . '/install/upgrade.php';
-        $upgrade2File = DOL_DOCUMENT_ROOT . '/install/upgrade2.php';
-        $step5File = DOL_DOCUMENT_ROOT . '/install/step5.php';
-
-        if (!file_exists($upgradeFile)) {
-            $this->error("Upgrade file not found: $upgradeFile");
-            return false;
-        }
-
-        if (!file_exists($upgrade2File)) {
-            $this->error("Upgrade file not found: $upgrade2File");
-            return false;
-        }
-
-        if (!file_exists($step5File)) {
-            $this->error("Upgrade file not found: $step5File");
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Run a Dolibarr install script (upgrade.php / upgrade2.php / step5.php) in a fresh
-     * php subprocess. Doing it inline via `include` causes problems because:
-     *  - Dolibarr's install/inc.php is designed for CLI mode with $argv set globally
-     *  - The scripts call exit() on completion, which kills our main process and prevents
-     *    cleanup (chown restore, lock recreation, maintenance mode disabling)
-     *  - PHP's include_once tracks files globally, so calling 2 install scripts back to
-     *    back from the same process means the 2nd one's `include_once 'inc.php'` is a
-     *    no-op and $conffile / $dolibarr_main_* aren't initialized in scope
-     *
-     * Running in a subprocess avoids all of these: each script gets a fresh bootstrap,
-     * its exit() is contained, and its argv is exactly what Dolibarr's CLI parser expects.
-     */
-    private function runDolibarrInstallScript(string $scriptName, array $args): bool
-    {
-        $installDir = DOL_DOCUMENT_ROOT . '/install';
-        $scriptPath = $installDir . '/' . $scriptName;
-
-        if (!file_exists($scriptPath)) {
-            $this->error("Install script not found: $scriptPath");
-            return false;
-        }
-
-        $cmd = array_merge([PHP_BINARY, $scriptPath], $args);
-
-        $descriptors = [
-            0 => ['pipe', 'r'], // stdin (unused)
-            1 => ['pipe', 'w'], // stdout
-            2 => ['pipe', 'w'], // stderr
-        ];
-
-        $process = proc_open($cmd, $descriptors, $pipes, $installDir);
-        if (!is_resource($process)) {
-            $this->error("Failed to spawn subprocess for $scriptName");
-            return false;
-        }
-
-        fclose($pipes[0]);
-        stream_set_blocking($pipes[1], false);
-        stream_set_blocking($pipes[2], false);
-
-        // Stream stdout/stderr as it arrives so the user sees progress on long migrations.
-        // Buffer per-line so strip_tags doesn't cut HTML tags mid-stream.
-        $stdoutBuf = '';
-        $stderrAll = '';
-
-        $flushStdout = function (bool $final = false) use (&$stdoutBuf) {
-            if ($stdoutBuf === '') {
-                return;
-            }
-            $emit = $stdoutBuf;
-            if (!$final) {
-                // Keep the last possibly-incomplete line in the buffer
-                $lastNl = strrpos($stdoutBuf, "\n");
-                if ($lastNl === false) {
-                    return; // No complete line yet; wait
-                }
-                $emit = substr($stdoutBuf, 0, $lastNl + 1);
-                $stdoutBuf = substr($stdoutBuf, $lastNl + 1);
-            } else {
-                $stdoutBuf = '';
-            }
-            $clean = strip_tags($emit);
-            $clean = html_entity_decode($clean, ENT_QUOTES | ENT_HTML5);
-            $this->rawOutput($clean);
-        };
-
-        // Capture the exit code via proc_get_status as soon as we detect running=false.
-        // proc_close can return -1 in cases where the child has already been reaped,
-        // even when the process exited 0. proc_get_status gives the real exit code
-        // exactly once per process; after that it returns -1.
-        $exitCode = null;
-        while (true) {
-            $stdoutChunk = fread($pipes[1], 8192);
-            $stderrChunk = fread($pipes[2], 8192);
-
-            if ($stdoutChunk !== false && $stdoutChunk !== '') {
-                $stdoutBuf .= $stdoutChunk;
-                $flushStdout(false);
-            }
-            if ($stderrChunk !== false && $stderrChunk !== '') {
-                $stderrAll .= $stderrChunk;
-            }
-
-            $status = proc_get_status($process);
-            if (!$status['running']) {
-                $exitCode = $status['exitcode'];
-                while (($chunk = fread($pipes[1], 8192)) !== false && $chunk !== '') {
-                    $stdoutBuf .= $chunk;
-                }
-                while (($chunk = fread($pipes[2], 8192)) !== false && $chunk !== '') {
-                    $stderrAll .= $chunk;
-                }
-                break;
-            }
-
-            if ($stdoutChunk === '' && $stderrChunk === '') {
-                usleep(50000);
-            }
-        }
-
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        proc_close($process); // ignore return value; we already have the real exit code
-
-        $flushStdout(true);
-        if ($stderrAll !== '') {
-            $this->error("[$scriptName stderr]\n" . $stderrAll);
-        }
-
-        return $exitCode === 0;
-    }
-
-    private function executeUpgradeStep1(): bool
-    {
-        $from = $this->migrationFromVersion ?? '';
-        $to = $this->migrationToVersion ?? '';
-        $args = [$from, $to];
-        if ($this->hasFlag('force')) {
-            $args[] = 'ignoredbversion';
-        }
-        return $this->runDolibarrInstallScript('upgrade.php', $args);
-    }
-
-    private function executeUpgradeStep2(): bool
-    {
-        global $conf;
-        $from = $this->migrationFromVersion ?? '';
-        $to = $this->migrationToVersion ?? '';
-        // upgrade2.php signature: previous_version new_version [module list]
-        // We pass no module list (Dolibarr will process all enabled modules).
-        return $this->runDolibarrInstallScript('upgrade2.php', [$from, $to]);
-    }
-
-    private function executeUpgradeStep3(): bool
-    {
-        global $conf;
-        $from = $this->migrationFromVersion ?? '';
-        $to = $this->migrationToVersion ?? '';
-        $selectlang = $conf->global->MAIN_LANG_DEFAULT ?? 'en_US';
-        // step5.php signature: previous_version new_version [selectlang] [action]
-        //                       [login] [pass] [pass_verif] [installlock]
-        // - action MUST be 'upgrade' (not 'set'): the 'set' branch is for fresh installs
-        //   and does NOT update MAIN_VERSION_LAST_UPGRADE in llx_const, which leaves
-        //   Dolibarr permanently telling the web user to visit /install/.
-        // - installlock=1 makes step5 create DOL_DATA_ROOT/install.lock itself.
-        return $this->runDolibarrInstallScript(
-            'step5.php',
-            [$from, $to, $selectlang, 'upgrade', '', '', '', '1']
-        );
-    }
-
-    public function required(): array
-    {
-        return [];
-    }
-
-    /**
-     * put or remove lockfile
-     *
-     * @param   [type]$lock  [$lock description]
-     * @param   true         [ description]
-     *
-     * @return  [type]       [return description]
-     */
-    private function lockUnlock($lock = true)
-    {
-        $lockFile = DOL_DATA_ROOT . "/install.lock";
-        if ($lock) {
-            touch($lockFile);
-        } else {
-            @unlink($lockFile);
-        }
+        return $size;
     }
 }
