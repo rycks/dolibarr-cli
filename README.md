@@ -48,49 +48,79 @@ dolifleet serve
 
 ### Adding a server
 
+Example: your SSH key logs in as `debian` on `dolibarr.example.com`, and Dolibarr is installed
+in `/srv/webs/dolibarr.example.com/dolibarr` (with `htdocs/` and `documents/` inside).
+
 A server is an alias of `~/.ssh/config`: host, port, user and keys stay there, never in the
 inventory.
 
 ```
 # ~/.ssh/config
-Host web-client-a
-    HostName erp.client-a.example
-    User admin
-    ProxyJump bastion
+Host dolibarr-example
+    HostName dolibarr.example.com
+    User debian
+    IdentityFile ~/.ssh/id_ed25519
 ```
 
-`dolifleet add` checks the host key (fingerprint shown, confirmation asked), finds the Dolibarr
-installations under `/var/www`, then asks which ones to add:
+`dolifleet add` checks the host key (fingerprint shown, confirmation asked), searches the
+Dolibarr installations under `--root` (`/var/www` by default), then asks which ones to add:
 
 ```
-$ dolifleet add web-client-a --php=/usr/bin/php7.4 --sudo --tags=client-a
-  client-a-prod            18.0.4     /var/www/client-a/htdocs (run_as www-data)
-  client-a-preprod         18.0.4     /var/www/client-a-preprod/htdocs (run_as www-data)
-Instances to add, comma separated [client-a-prod,client-a-preprod]:
-Added 2 instance(s) of web-client-a to ~/.config/dolifleet/inventory.yaml. Next: dolifleet check server:web-client-a
+$ dolifleet add dolibarr-example --root=/srv/webs --php=/usr/bin/php8.2 --sudo
+Host key of dolibarr-example:
+256 SHA256:3fQ0...Xk2w dolibarr.example.com (ED25519)
+Is this the key of dolibarr-example? Type yes to add it to known_hosts: yes
+  dolibarr                 20.0.2     /srv/webs/dolibarr.example.com/dolibarr/htdocs (run_as www-data)
+Instances to add, comma separated [dolibarr]:
+Added 1 instance(s) of dolibarr-example to ~/.config/dolifleet/inventory.yaml. Next: dolifleet check server:dolibarr-example
 ```
 
-`--sudo` searches as root, needed when `conf.php` is only readable by its owner. In a script,
-give the instances to add (`--instances=client-a-prod`) and, for a new server,
-`--accept-host-key`. The server block is appended to the inventory, comments kept:
+- `--sudo` searches as root (`sudo -n`): `debian` usually cannot read `conf.php`, owned by the
+  web account. The search reads `conf.php` without executing it and never returns credentials.
+- `run_as` is the owner of `documents/`: dolifleet will run `sudo -n -u www-data /usr/bin/php8.2`
+  as `debian`, which needs a sudo rule on the server (`/etc/sudoers.d/dolifleet`):
+
+  ```
+  debian ALL=(www-data) NOPASSWD: /usr/bin/php8.2
+  debian ALL=(root) NOPASSWD: /usr/bin/php8.2
+  ```
+
+  The second line is only needed by `--sudo` and `dolifleet setup` (installed mode). A rule on a
+  PHP binary amounts to a shell under that account: see the user documentation.
+- In a script: `--instances=dolibarr` instead of the question, `--accept-host-key` for a new server.
+
+The server block is appended to the inventory, comments kept:
 
 ```yaml
 servers:
-  web-client-a:
-    php: '/usr/bin/php7.4'
+  dolibarr-example:
+    php: '/usr/bin/php8.2'
     instances:
-      client-a-prod:
-        htdocs: '/var/www/client-a/htdocs'
+      dolibarr:
+        htdocs: '/srv/webs/dolibarr.example.com/dolibarr/htdocs'
         run_as: 'www-data'
-        tags: ['client-a']
-      client-a-preprod:
-        htdocs: '/var/www/client-a-preprod/htdocs'
-        run_as: 'www-data'
-        tags: ['client-a']
 ```
 
-Then add the tag `prod` by hand to the production instances (protected by default), and
-`web_php`, `dolibarr_user` or `maintenance_login` when needed.
+The identifier of a discovered instance is the name of the directory containing `htdocs/`, here
+`dolibarr`: rename it in the inventory (for example `example-prod`) before `dolifleet setup`,
+which writes the same identifier in `/etc/dolicli/instances.ini` on the server. Add the tag `prod`
+by hand to production instances (protected by default), and `web_php`, `dolibarr_user` or
+`maintenance_login` when needed:
+
+```yaml
+      example-prod:
+        htdocs: '/srv/webs/dolibarr.example.com/dolibarr/htdocs'
+        run_as: 'www-data'
+        web_php: '8.2'
+        tags: [prod]
+```
+
+Then:
+
+```
+dolifleet check example-prod
+dolifleet status example-prod
+```
 
 ## Development
 

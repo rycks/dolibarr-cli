@@ -122,7 +122,9 @@ final class CheckCommand extends FleetCommand
         ];
         $checks['installed_version'] = $version;
 
-        $root = $transport->run($instance->server, 'root' === $transport->remoteUser($instance->server) ? ['true'] : ['sudo', '-n', 'true'], '', 30);
+        // Same command as dolifleet setup and discover --sudo: PHP as root (a sudo rule may allow only PHP).
+        $probeRoot = [$php, '-r', 'exit(0);'];
+        $root = $transport->run($instance->server, 'root' === $transport->remoteUser($instance->server) ? $probeRoot : array_merge(['sudo', '-n'], $probeRoot), '', 30);
         $checks['root'] = ['ok' => 0 === $root->exitCode, 'level' => 'warning', 'detail' => 0 === $root->exitCode ? 'root access available for dolifleet setup' : 'no root access: dolifleet setup will fail ('.trim($root->stderr).')'];
 
         $ini = $transport->run($instance->server, ['cat', '/etc/dolicli/instances.ini'], '', 30);
