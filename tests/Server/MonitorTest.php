@@ -73,6 +73,21 @@ it('measures the age of the most recent backup against the thresholds', function
         ->and($state['checks']['backup.age']['thresholds'])->toBe(['warning' => 129600, 'critical' => 259200]);
 });
 
+it('ignores directories when it looks for the most recent backup', function (): void {
+    $dir = DOLICLI_TEST_TMP.'/backups-'.bin2hex(random_bytes(4));
+    mkdir($dir.'/recent', 0755, true);
+    touch($dir.'/old.sql', time() - 200000);
+    touch($dir.'/recent', time());
+    declareTestInstance(['backup_dir' => $dir]);
+
+    serverJson(['monitor', 'collect', '--slow', '--instance=testinst']);
+    $check = json_decode((string) file_get_contents(testStateFile('testinst')), true)['checks']['backup.age'];
+
+    expect($check['message'])->toContain('old.sql')
+        ->and($check['message'])->not->toContain('recent')
+        ->and($check['value'])->toBeGreaterThanOrEqual(200000);
+});
+
 it('writes the state on stdout without touching the file', function (): void {
     $result = server(['monitor', 'collect', '--stdout']);
 

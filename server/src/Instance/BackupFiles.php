@@ -58,7 +58,8 @@ final class BackupFiles
     }
 
     /**
-     * Most recent match and its modification time; ['', 0] when there is none.
+     * Most recent regular file among the matches and its modification time; ['', 0] when there is
+     * none. Directories are skipped, like backup list does.
      *
      * @return array{0: string, 1: int}
      */
@@ -67,6 +68,9 @@ final class BackupFiles
         $latest = 0;
         $latestFile = '';
         foreach ($this->matches() as $file) {
+            if (!is_file($file)) {
+                continue;
+            }
             $mtime = (int) @filemtime($file);
             if ($mtime > $latest) {
                 $latest = $mtime;
