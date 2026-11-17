@@ -10,6 +10,7 @@ namespace Dolifleet\Console\Terminal;
  *
  * A lone ESC is ambiguous (Escape key, or the start of a sequence cut by the read): decode()
  * keeps it pending unless $final is true, which the caller sets after a short silence.
+ * Lengths and cuts are in bytes ('8bit'), whatever the characters.
  */
 final class Keys
 {
@@ -37,12 +38,12 @@ final class Keys
     {
         $keys = [];
         $offset = 0;
-        $length = mb_strlen($bytes);
+        $length = mb_strlen($bytes, '8bit');
         while ($offset < $length) {
             $char = $bytes[$offset];
             if ("\e" === $char) {
-                $rest = mb_substr($bytes, $offset);
-                if (1 === mb_strlen($rest)) {
+                $rest = mb_substr($bytes, $offset, null, '8bit');
+                if (1 === mb_strlen($rest, '8bit')) {
                     if ( ! $final) {
                         return [$keys, $rest];
                     }
@@ -64,7 +65,7 @@ final class Keys
                 if ('' !== $name) {
                     $keys[] = $name;
                 }
-                $offset += mb_strlen($sequence);
+                $offset += mb_strlen($sequence, '8bit');
                 continue;
             }
             if (isset(self::CONTROLS[$char])) {
@@ -83,11 +84,11 @@ final class Keys
             $size = $ord < 0x80 ? 1 : ($ord >= 0xF0 ? 4 : ($ord >= 0xE0 ? 3 : ($ord >= 0xC0 ? 2 : 1)));
             if ($offset + $size > $length) {
                 if ( ! $final) {
-                    return [$keys, mb_substr($bytes, $offset)];
+                    return [$keys, mb_substr($bytes, $offset, null, '8bit')];
                 }
                 break;
             }
-            $character = mb_substr($bytes, $offset, $size);
+            $character = mb_substr($bytes, $offset, $size, '8bit');
             $offset += $size;
             if (mb_check_encoding($character, 'UTF-8')) {
                 $keys[] = $character;

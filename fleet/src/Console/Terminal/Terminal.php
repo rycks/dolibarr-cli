@@ -102,10 +102,10 @@ final class Terminal
 
     public function write(string $bytes): void
     {
-        $length = mb_strlen($bytes);
+        $length = mb_strlen($bytes, '8bit');
         $written = 0;
         while ($written < $length) {
-            $count = @fwrite($this->out, mb_substr($bytes, $written));
+            $count = @fwrite($this->out, mb_substr($bytes, $written, null, '8bit'));
             if (false === $count || 0 === $count) {
                 return;
             }
