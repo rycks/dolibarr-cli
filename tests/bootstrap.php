@@ -37,6 +37,14 @@ $GLOBALS['dolicliInitialDocuments'] = array_values(array_filter(
     static fn ($f): bool => is_string($f) && is_file(DOLICLI_TEST_DOCUMENTS.'/'.$f)
 ));
 
+// The server tests run the built body: build it once for the run, in the private directory.
+define('DOLICLI_TEST_DIST', $tmpRoot.'/dist');
+exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg(DOLICLI_ROOT.'/build/build-server.php').' --output='.escapeshellarg(DOLICLI_TEST_DIST).' --version=test 2>&1', $buildOutput, $buildCode);
+if (0 !== $buildCode) {
+    fwrite(STDERR, "Cannot build the dolicli body:\n".implode("\n", $buildOutput)."\n");
+    exit(1);
+}
+
 if ( ! copy(DOLICLI_TEST_DB, DOLICLI_TEST_DB_BACKUP)) {
     fwrite(STDERR, "Cannot back up the SQLite Dolibarr database\n");
     exit(1);

@@ -35,5 +35,9 @@
     "use_arrow_functions": true,
     "void_return": true,
     "yoda_style": true
-  }
+  },
+  "exclude": [
+    "server",
+    "dist"
+  ]
 }

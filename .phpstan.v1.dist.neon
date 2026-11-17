@@ -1,0 +1,15 @@
+parameters:
+	level: 6
+	paths:
+		- app
+		- dolibarr
+	fileExtensions:
+		- php
+	# The PHPDoc of the Dolibarr core is not reliable (fetch_object() is
+	# documented as never returning null): do not take it as a certainty
+	treatPhpDocTypesAsCertain: false
+	checkMaybeUndefinedVariables: true
+	universalObjectCratesClasses:
+		- stdClass
+		- SimpleXMLElement
+	reportUnmatchedIgnoredErrors: true

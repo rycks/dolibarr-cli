@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rycks/dolibarr-cli/schema/envelope.schema.json",
+  "title": "dolicli command envelope",
+  "description": "Result of every dolicli command with --format=json. Version 1.x: adding a field is a minor change; renaming, removing or changing the unit of a field is a major change.",
+  "type": "object",
+  "required": ["schema_version", "dolicli_version", "command", "instance", "acting_user", "ok", "data", "warnings", "errors", "duration_ms"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Version of this schema, major.minor.",
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "dolicli_version": {
+      "description": "Version of dolicli (git describe), 'dev' when run from the sources.",
+      "type": "string"
+    },
+    "command": {
+      "description": "Command words ('user list'), empty when the command could not be determined.",
+      "type": "string"
+    },
+    "instance": {
+      "description": "Instance the command ran on, null for commands without instance.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["id", "htdocs", "entity"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+            "htdocs": { "type": "string" },
+            "entity": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "acting_user": {
+      "description": "Dolibarr login the actions were done for, null when no Dolibarr user was needed.",
+      "type": ["string", "null"]
+    },
+    "ok": {
+      "description": "True if and only if errors is empty.",
+      "type": "boolean"
+    },
+    "data": {
+      "description": "Result of the command, always an object (its content is described by the manifest of each command).",
+      "type": "object"
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "duration_ms": {
+      "description": "Run time of the command, in milliseconds.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "description": "Stable identifier (UPPER_SNAKE_CASE).",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+          "description": "Free text, in English.",
+          "type": "string"
+        },
+        "details": {
+          "description": "Machine-readable details, depending on the code.",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": true } } },
+      "then": { "properties": { "errors": { "maxItems": 0 } } },
+      "else": { "properties": { "errors": { "minItems": 1 } } }
+    }
+  ]
+}

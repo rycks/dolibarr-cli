@@ -18,3 +18,4 @@ TODO*.md
 *.log
 .env
 /.phpstan.local.neon
+/dist/

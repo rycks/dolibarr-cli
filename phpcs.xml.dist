@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<ruleset name="dolicli-server">
+    <description>dolicli server code: PSR-12, and PHP 7.0 compatibility (PHPCompatibility is the reference).</description>
+
+    <file>server</file>
+    <exclude-pattern>server/launcher.php</exclude-pattern>
+
+    <arg name="extensions" value="php"/>
+    <arg name="colors"/>
+    <arg value="sp"/>
+
+    <rule ref="PSR12">
+        <!-- Constant visibility needs PHP 7.1. -->
+        <exclude name="PSR12.Properties.ConstantVisibility"/>
+    </rule>
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="200"/>
+            <property name="absoluteLineLimit" value="0"/>
+        </properties>
+    </rule>
+    <!-- main.php is the global code of the body: side effects are its purpose. -->
+    <rule ref="PSR1.Files.SideEffects">
+        <exclude-pattern>server/main.php</exclude-pattern>
+        <exclude-pattern>server/dev.php</exclude-pattern>
+    </rule>
+
+    <rule ref="PHPCompatibility"/>
+    <config name="testVersion" value="7.0-"/>
+</ruleset>

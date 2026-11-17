@@ -1,10 +1,13 @@
 parameters:
+	# dolicli server code: runs from PHP 7.0. PHPStan 2 refuses phpVersion 70000
+	# (range 70100..80699): 70100 here, PHPCompatibility (phpcs.xml.dist,
+	# testVersion 7.0-) is the reference for PHP 7.0.
 	level: 6
+	phpVersion: 70100
 	paths:
-		- app
-		- dolibarr
-	fileExtensions:
-		- php
+		- server/src
+		- server/main.php
+		- server/dev.php
 	# The PHPDoc of the Dolibarr core is not reliable (fetch_object() is
 	# documented as never returning null): do not take it as a certainty
 	treatPhpDocTypesAsCertain: false
@@ -13,3 +16,6 @@ parameters:
 		- stdClass
 		- SimpleXMLElement
 	reportUnmatchedIgnoredErrors: true
+	ignoreErrors:
+		# PHP 7.0 has no void return type: methods without a return value stay untyped.
+		- identifier: missingType.return

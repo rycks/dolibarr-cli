@@ -1,0 +1,7 @@
+parameters:
+	# Development tools (build), PHP 8.2.
+	level: 6
+	phpVersion: 80200
+	paths:
+		- build
+	reportUnmatchedIgnoredErrors: true

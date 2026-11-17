@@ -2,9 +2,9 @@ name: PHP
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, v2.0 ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, v2.0 ]
 
 jobs:
   build:
@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - uses: shivammathur/setup-php@v2
       with:
@@ -32,14 +34,52 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
-    - name: Check syntax and code style
+    - name: Build the dolicli body
+      run: make build
+
+    - name: Upload the body
+      uses: actions/upload-artifact@v4
+      with:
+        name: dolicli-body
+        path: dist/
+
+    - name: Check syntax, code style and PHP 7.0 compatibility
       run: make lint
 
     - name: Static analysis
-      run: vendor/bin/phpstan analyse -c .phpstan.github.neon --memory-limit=1G --no-progress
+      run: make phpstan PHPSTAN_LOCAL=.phpstan.github.neon
 
     - name: Run test suite
       run: vendor/bin/pest
 
     - name: Build the phar
       run: vendor/bin/box compile
+
+  # php -l of the built body under every PHP of the matrix (contract 4.2).
+  syntax:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: [ '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5' ]
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: dolicli-body
+        path: dist/
+
+    - uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php }}
+
+    - name: Syntax of the body
+      run: php -l dist/dolicli.php
+
+    - name: Commands without Dolibarr
+      run: |
+        php dist/dolicli version --format=json | php -r 'exit(json_decode(stream_get_contents(STDIN), true)["ok"] === true ? 0 : 1);'
+        php dist/dolicli help --format=text > /dev/null
+
+    - name: Ephemeral mode
+      run: |
+        { printf '<?php namespace { $DOLICLI_ARGV = array("dolicli", "version", "--format=json"); } ?>'; cat dist/dolicli.php; } | php -- | grep -q '"ok": true'
