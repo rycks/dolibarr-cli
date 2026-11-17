@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Dolifleet\Command;
 
+use Dolifleet\Console\Lang\Translator;
+use Dolifleet\Console\Settings;
 use Dolifleet\Paths;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Process\Process;
 use RuntimeException;
 
@@ -14,18 +17,25 @@ use RuntimeException;
  * Local dashboard: built-in PHP server on 127.0.0.1, on a free port chosen at start (tried
  * again when taken meanwhile), stopped with the command. The token is printed here and given
  * to the server through its environment: never on a command line (xdg-open would expose it).
+ * The language is chosen like the one of the console (option, DOLIFLEET_LANG, settings, locale).
  */
 #[AsCommand(name: 'serve', description: 'Local web dashboard of the fleet (127.0.0.1 only)')]
 final class ServeCommand extends FleetCommand
 {
     protected function configure(): void
     {
-        $this->addOption('port', null, InputOption::VALUE_REQUIRED, 'Port (default: a free one)', '0');
+        $this->addOption('port', null, InputOption::VALUE_REQUIRED, 'Port (default: a free one)', '0')
+            ->addOption('lang', null, InputOption::VALUE_REQUIRED, 'Language of the dashboard (fr, en...), as for the console');
     }
 
     protected function handle(): int
     {
         $this->inventory();
+        $option = $this->input->getOption('lang');
+        $t = Translator::resolve(is_string($option) ? $option : null, Settings::load());
+        if (is_string($option) && $t->code() !== Translator::normalize($option)) {
+            $this->error($t->t('web.serve.lang_unknown', $option, implode(', ', array_keys(Translator::available())), $t->code()));
+        }
         $token = bin2hex(random_bytes(24));
         $router = dirname(__DIR__, 2).'/web/router.php';
         if (str_starts_with($router, 'phar://')) {
@@ -45,6 +55,7 @@ final class ServeCommand extends FleetCommand
             $env = [
                 'DOLIFLEET_SERVE_TOKEN' => $token,
                 'DOLIFLEET_SERVE_PORT' => (string) $port,
+                'DOLIFLEET_SERVE_LANG' => $t->code(),
                 'DOLIFLEET_INVENTORY' => Paths::inventory(),
             ];
             $server = new Process([PHP_BINARY, '-S', '127.0.0.1:'.$port, $router], dirname($router), $env, null, null);
@@ -52,23 +63,24 @@ final class ServeCommand extends FleetCommand
             usleep(400000);
             if ( ! $server->isRunning()) {
                 if ($fixed > 0) {
-                    $this->error('Cannot listen on 127.0.0.1:'.$port.': '.trim($server->getErrorOutput()));
+                    $this->error($t->t('web.serve.cannot_listen', $port, trim($server->getErrorOutput())));
 
                     return self::EXIT_FAILED;
                 }
                 continue;
             }
-            $this->output->writeln('Dashboard: http://127.0.0.1:'.$port.'/?token='.$token);
-            $this->output->writeln('Open this URL in your browser (the token is exchanged for a cookie). Ctrl-C stops the dashboard.');
+            $this->output->writeln($t->t('web.serve.url', 'http://127.0.0.1:'.$port.'/?token='.$token), OutputInterface::OUTPUT_RAW);
+            $this->output->writeln($t->t('web.serve.open'), OutputInterface::OUTPUT_RAW);
+            $this->output->writeln($t->t('web.serve.tunnel', $port), OutputInterface::OUTPUT_RAW);
             $server->wait(function (string $type, string $data): void {
                 if (Process::ERR === $type) {
-                    $this->output->write($data, false, \Symfony\Component\Console\Output\OutputInterface::OUTPUT_RAW);
+                    $this->output->write($data, false, OutputInterface::OUTPUT_RAW);
                 }
             });
 
             return 0 === $server->getExitCode() ? self::EXIT_OK : self::EXIT_FAILED;
         }
-        $this->error('No free port found for the dashboard.');
+        $this->error($t->t('web.serve.no_port'));
 
         return self::EXIT_FAILED;
     }
