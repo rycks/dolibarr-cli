@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
+use App\Support\ExitStatus;
 use Minicli\Command\CommandController;
 
 class FilecheckController extends CommandController
@@ -309,12 +310,7 @@ Examples:
     private function setExit(int $code): void
     {
         $this->exitCode = $code;
-        if (PHP_SAPI === 'cli' && $code !== self::EXIT_OK) {
-            // Defer the exit so that all output is flushed first.
-            register_shutdown_function(static function () use ($code): void {
-                exit($code);
-            });
-        }
+        ExitStatus::set($code);
     }
 
     public function required(): array

@@ -18,28 +18,40 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
 if (!defined('NOSESSION')) {
-	define('NOSESSION', '1');
+    define('NOSESSION', '1');
+}
+
+// Global option entity=N: work on another company of a multicompany setup.
+foreach ($argv as $arg) {
+    if (preg_match('/^(?:--)?entity=(\d+)$/', $arg, $matches)) {
+        define('DOLENTITY', (int) $matches[1]);
+    }
 }
 
 // Include Dolibarr environment
-$path = getenv('DOLPATH') ?? './htdocs/';
-if(!file_exists($path . "/master.inc.php")) {
-    echo "Dolibarr sources must be in htdocs subfolder or please set DOLPATH env var \n\n";
-    exit;
+$path = rtrim((string) (getenv('DOLPATH') ?: './htdocs'), '/');
+if (!is_file($path . '/master.inc.php')) {
+    fwrite(STDERR, "Dolibarr not found in '" . $path . "': put the sources in ./htdocs or set the DOLPATH environment variable.\n");
+    exit(1);
 }
 
-ob_start('strip_tags');
+// master.inc.php prints HTML on fatal errors (database unreachable...) and may exit:
+// strip the tags of anything it prints, then stop buffering.
+ob_start(static fn (string $buffer): string => strip_tags($buffer));
 chdir($path);
-require_once "./master.inc.php";
-ob_flush();
-
-if (php_sapi_name() !== 'cli') {
-    exit;
-}
+require_once './master.inc.php';
+ob_end_flush();
 
 require __DIR__ . '/vendor/autoload.php';
 
+use App\Support\ExitStatus;
+use App\Util\DolibarrHelper;
 use Minicli\App;
 use Minicli\Exception\CommandNotFoundException;
 
@@ -48,14 +60,15 @@ $app = new App();
 try {
     $app->runCommand($argv);
 } catch (CommandNotFoundException $notFoundException) {
-    $app->error("Command Not Found.");
-    return 1;
-} catch (Exception $exception) {
-    if ($app->config->debug) {
-        $app->error("An error occurred:");
-        $app->error($exception->getMessage());
+    fwrite(STDERR, "Command not found. Run ./dolibarr without argument for the list of commands.\n");
+    exit(1);
+} catch (Throwable $exception) {
+    DolibarrHelper::log('uncaught ' . get_class($exception) . ': ' . $exception->getMessage(), LOG_ERR);
+    fwrite(STDERR, 'Error: ' . $exception->getMessage() . "\n");
+    if ($app->config->trace) {
+        fwrite(STDERR, $exception->getTraceAsString() . "\n");
     }
-    return 1;
+    exit(1);
 }
 
-return 0;
+exit(ExitStatus::get());
