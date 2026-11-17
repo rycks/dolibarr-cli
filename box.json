@@ -1,7 +1,7 @@
 {
     "main": "fleet/bin/dolifleet",
     "output": "dist/dolifleet.phar",
-    "directories": ["fleet/src", "fleet/web", "server/src"],
+    "directories": ["fleet/src", "fleet/web", "fleet/lang", "server/src"],
     "files": ["LICENSE", "dist/dolicli.php", "server/launcher.php"],
     "finder": [
         {
