@@ -7,6 +7,7 @@ namespace Dolifleet\Console\Screen;
 use Dolifleet\Console\App;
 use Dolifleet\Console\Tasks\Task;
 use Dolifleet\Console\Terminal\Line;
+use Dolifleet\Console\View\ListControls;
 use Dolifleet\Console\View\Table;
 
 /**
@@ -19,6 +20,18 @@ final class BackstageScreen extends Screen
 
     private int $offset = 0;
 
+    private ListControls $controls;
+
+    public function __construct()
+    {
+        $this->controls = new ListControls(['time' => 'col.time', 'command' => 'col.command', 'duration' => 'col.duration', 'state' => 'col.state']);
+    }
+
+    public function captures(): bool
+    {
+        return $this->controls->captures();
+    }
+
     public function breadcrumb(App $app): array
     {
         return [$app->t->t('backstage.title')];
@@ -26,16 +39,26 @@ final class BackstageScreen extends Screen
 
     public function counters(App $app): string
     {
-        return $app->t->t('backstage.count', count($app->backend->all()));
+        return trim($this->controls->summary($app->t).'   '.$app->t->t('backstage.count', count($app->backend->all())));
     }
 
     public function keys(App $app): array
     {
-        return [[$app->t->t('key.enter'), $app->t->t('key.detail')], [$app->t->t('key.esc'), $app->t->t('key.back')]];
+        if ($this->controls->captures()) {
+            return $this->controls->keys($app->t);
+        }
+
+        return array_merge([[$app->t->t('key.enter'), $app->t->t('key.detail')]], $this->controls->keys($app->t), [[$app->t->t('key.esc'), $app->t->t('key.back')]]);
     }
 
     public function handle(App $app, string $key): bool
     {
+        if (($this->controls->captures() || in_array($key, ['/', 's', 'S', 'esc'], true)) && $this->controls->handle($key)) {
+            $this->cursor = 0;
+            $this->offset = 0;
+
+            return true;
+        }
         $tasks = $this->tasks($app);
         $count = count($tasks);
         switch ($key) {
@@ -80,7 +103,7 @@ final class BackstageScreen extends Screen
     {
         $t = $app->t;
         $tasks = $this->tasks($app);
-        if ([] === $tasks) {
+        if ([] === $app->backend->all()) {
             return [Line::of('  '.$t->t('backstage.empty'), 'dim')];
         }
         $table = (new Table())
@@ -97,19 +120,37 @@ final class BackstageScreen extends Screen
                 'state' => Line::of($t->t('task.'.$state), Task::FAILED === $state ? 'crit' : (Task::RUNNING === $state ? 'running' : '')),
             ]);
         }
-        $this->cursor = min($this->cursor, count($tasks) - 1);
-        $this->offset = Table::scroll($this->cursor, $this->offset, $height - 2, count($tasks));
-        $lines = $table->render($width, $height - 1, $this->cursor, $this->offset);
+        $input = $this->controls->inputLine();
+        $room = $height - 1 - (null === $input ? 0 : 2);
+        $this->cursor = max(0, min($this->cursor, count($tasks) - 1));
+        $this->offset = Table::scroll($this->cursor, $this->offset, $room - 1, count($tasks));
+        $lines = $table->render($width, $room, $this->cursor, $this->offset);
+        while (count($lines) < $room) {
+            $lines[] = Line::blank();
+        }
         $lines[] = Line::of('  '.$t->t('backstage.hint'), 'dim');
+        if (null !== $input) {
+            $lines[] = Line::blank();
+            $lines[] = $input;
+        }
 
         return $lines;
     }
 
     /**
+     * Tasks shown, newest first, through the filter and the sort.
+     *
      * @return list<Task>
      */
     private function tasks(App $app): array
     {
-        return array_reverse($app->backend->all());
+        $byId = [];
+        $records = [];
+        foreach (array_reverse($app->backend->all()) as $task) {
+            $byId[$task->id] = $task;
+            $records[] = ['_id' => $task->id, 'time' => date('H:i:s', (int) $task->startedAt), 'command' => $task->commandLine(), 'duration' => round($task->duration(), 1), 'state' => $app->t->t('task.'.$task->state())];
+        }
+
+        return array_map(static fn (array $record): Task => $byId[(string) $record['_id']], $this->controls->apply($records));
     }
 }

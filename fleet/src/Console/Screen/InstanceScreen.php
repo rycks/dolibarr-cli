@@ -12,6 +12,7 @@ use Dolifleet\Console\Lang\Translator;
 use Dolifleet\Console\Tasks\Command;
 use Dolifleet\Console\Tasks\Task;
 use Dolifleet\Console\Terminal\Line;
+use Dolifleet\Console\View\ListControls;
 use Dolifleet\Console\View\Signs;
 use Dolifleet\Console\View\Table;
 use Dolifleet\Store\Journal;
@@ -41,6 +42,19 @@ final class InstanceScreen extends Screen implements TargetAware
     private array $offset = [];
 
     private bool $refreshed = false;
+
+    /** @var array<int, ListControls> tab => filter and sort of its list */
+    private array $controls = [];
+
+    /** @var array<string, array<string, string>> tab => sortable field => key of its column label */
+    private const SORTABLE = [
+        'modules' => ['name' => 'col.module', 'version' => 'col.version', 'active' => 'col.active', 'external' => 'col.external', 'publisher' => 'col.publisher'],
+        'users' => ['login' => 'col.login', 'lastname' => 'col.name', 'admin' => 'col.admin', 'status' => 'col.status', 'email' => 'col.email'],
+        'cron' => ['label' => 'col.label', 'status' => 'col.status', 'frequency' => 'col.frequency', 'last_run' => 'col.last_run', 'last_result' => 'col.result', 'next_run' => 'col.next_run'],
+        'backups' => ['file' => 'col.file', 'kind' => 'col.kind', 'bytes' => 'col.size', 'date' => 'col.date'],
+        'journal' => ['date' => 'col.date', 'phase' => 'col.phase', 'command' => 'col.command', 'operator' => 'col.who'],
+        'monitor' => ['check' => 'col.check', 'status' => 'col.state', 'collected_at' => 'col.collected'],
+    ];
 
     public function __construct(public readonly string $id, int $tab = 1)
     {
@@ -76,6 +90,9 @@ final class InstanceScreen extends Screen implements TargetAware
         if (null !== $row->age) {
             $text .= '   '.$app->t->t('fleet.state_age', $app->t->ago($row->age));
         }
+        if (1 !== $this->tab && '' !== $this->controls()->summary($app->t)) {
+            $text = $this->controls()->summary($app->t).'   '.$text;
+        }
 
         return trim($text);
     }
@@ -90,8 +107,16 @@ final class InstanceScreen extends Screen implements TargetAware
         return $this->id;
     }
 
+    public function captures(): bool
+    {
+        return 1 !== $this->tab && $this->controls()->captures();
+    }
+
     public function keys(App $app): array
     {
+        if ($this->captures()) {
+            return $this->controls()->keys($app->t);
+        }
         $keys = [];
         $row = $app->row($this->id);
         if (null !== $row && '' !== $row->unreachable) {
@@ -99,6 +124,9 @@ final class InstanceScreen extends Screen implements TargetAware
         }
         if (1 !== $this->tab) {
             $keys[] = [$app->t->t('key.enter'), $app->t->t('key.detail')];
+        }
+        if (1 !== $this->tab) {
+            $keys = array_merge($keys, $this->controls()->keys($app->t));
         }
         if (2 === $this->tab) {
             $keys[] = ['x', $app->t->t($this->externalOnly ? 'key.all_modules' : 'key.external_modules')];
@@ -115,6 +143,12 @@ final class InstanceScreen extends Screen implements TargetAware
 
     public function handle(App $app, string $key): bool
     {
+        if (1 !== $this->tab && ($this->captures() || in_array($key, ['/', 's', 'S', 'esc'], true)) && $this->controls()->handle($key)) {
+            $this->cursor[$this->tab] = 0;
+            $this->offset[$this->tab] = 0;
+
+            return true;
+        }
         if (1 === preg_match('/^[1-7]$/', $key)) {
             $this->tab = (int) $key;
 
@@ -211,13 +245,22 @@ final class InstanceScreen extends Screen implements TargetAware
             return [Line::of(' '.$app->t->t('instance.unknown', $this->id), 'error')];
         }
         $lines = [$this->tabsLine($app), Line::of($app->style->rule($width, $row->prod), $row->prod ? 'frame-prod' : 'frame')];
-        $room = $height - count($lines);
+        $input = 1 === $this->tab ? null : $this->controls()->inputLine();
+        $room = $height - count($lines) - (null === $input ? 0 : 2);
         $content = match (self::TABS[$this->tab]) {
             'summary' => $this->summary($app, $row),
             'journal' => $this->table($app, $width, $room),
             'monitor' => $this->table($app, $width, $room),
             default => $this->listTab($app, $width, $room),
         };
+        if (null !== $input) {
+            $content = array_slice($content, 0, $room);
+            while (count($content) < $room) {
+                $content[] = Line::blank();
+            }
+            $content[] = Line::blank();
+            $content[] = $input;
+        }
 
         return array_merge($lines, $content);
     }
@@ -363,11 +406,26 @@ final class InstanceScreen extends Screen implements TargetAware
     }
 
     /**
-     * Records of the current tab, as received (details) and as shown (table).
+     * Records of the current tab as shown: filtered and sorted.
      *
      * @return list<array<string, mixed>>
      */
     private function records(App $app): array
+    {
+        return $this->controls()->apply($this->received($app));
+    }
+
+    private function controls(): ListControls
+    {
+        return $this->controls[$this->tab] ??= new ListControls(self::SORTABLE[self::TABS[$this->tab]] ?? []);
+    }
+
+    /**
+     * Records of the current tab as received.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function received(App $app): array
     {
         $name = self::TABS[$this->tab];
         if ('journal' === $name) {

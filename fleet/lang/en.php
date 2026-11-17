@@ -119,6 +119,10 @@ return [
     'col.time' => 'time',
     'col.duration' => 'duration',
 
+    'list.filter' => 'filter: %s',
+    'list.sort' => 'sorted by %s',
+    'list.sort_desc' => 'sorted by %s, reversed',
+    'list.reversed' => 'reversed order',
     'fleet.all' => 'all',
     'fleet.count' => '%d instances',
     'fleet.checked' => '%d checked',

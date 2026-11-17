@@ -489,3 +489,42 @@ it('keeps every column when the flexible one holds a long text, and drops the le
         ->and($narrow[0])->not->toContain('version')
         ->and($narrow[0])->toContain('state');
 });
+
+it('filters and sorts every list with the same keys: tabs of the card and backstage', function (): void {
+    [$app, $backend] = consoleApp();
+    press($app, ['enter', '3']);
+    screenOf($app);
+    $users = $backend->last(['exec', 'dev1', '--', 'user', 'list']);
+    $backend->finish($users, ['instances' => ['dev1' => ['ok' => true, 'envelope' => ['data' => ['users' => [
+        ['login' => 'admin', 'lastname' => 'Admin', 'firstname' => '', 'email' => 'admin@example.com', 'status' => 'enabled', 'admin' => 'yes'],
+        ['login' => 'zoe', 'lastname' => 'Martin', 'firstname' => 'Zoé', 'email' => 'zoe@example.com', 'status' => 'enabled', 'admin' => 'no'],
+        ['login' => 'bob', 'lastname' => 'Durand', 'firstname' => 'Bob', 'email' => 'bob@example.com', 'status' => 'disabled', 'admin' => 'no'],
+    ]]]]]]);
+    $app->tick();
+
+    press($app, ['/']);
+    expect($app->top()->captures())->toBeTrue();
+    typeText($app, 'zo');
+    press($app, ['enter']);
+    $filtered = implode("\n", screenOf($app));
+    expect($filtered)->toContain('zoe')
+        ->and($filtered)->not->toContain('bob@example.com')
+        ->and(screenOf($app)[0])->toContain('filtre : zo');
+
+    press($app, ['esc', 's']);
+    $sorted = screenOf($app);
+    $admin = array_key_first(array_filter($sorted, static fn (string $l): bool => str_contains($l, 'admin@example.com')));
+    $bob = array_key_first(array_filter($sorted, static fn (string $l): bool => str_contains($l, 'bob@example.com')));
+    $zoe = array_key_first(array_filter($sorted, static fn (string $l): bool => str_contains($l, 'zoe@example.com')));
+    expect($admin < $bob && $bob < $zoe)->toBeTrue()
+        ->and($sorted[0])->toContain('tri : identifiant');
+    press($app, ['S']);
+    expect(screenOf($app)[0])->toContain('tri : identifiant, inversé');
+
+    press($app, ['!', '/']);
+    typeText($app, 'user list');
+    press($app, ['enter']);
+    $backstage = implode("\n", screenOf($app));
+    expect($backstage)->toContain('dolifleet exec dev1 -- user list')
+        ->and($backstage)->not->toContain('dolifleet status dev1');
+});
