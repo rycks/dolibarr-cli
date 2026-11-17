@@ -46,6 +46,52 @@ dolifleet upgrade plan client-a-preprod --to=20.0.4
 dolifleet serve
 ```
 
+### Adding a server
+
+A server is an alias of `~/.ssh/config`: host, port, user and keys stay there, never in the
+inventory.
+
+```
+# ~/.ssh/config
+Host web-client-a
+    HostName erp.client-a.example
+    User admin
+    ProxyJump bastion
+```
+
+`dolifleet add` checks the host key (fingerprint shown, confirmation asked), finds the Dolibarr
+installations under `/var/www`, then asks which ones to add:
+
+```
+$ dolifleet add web-client-a --php=/usr/bin/php7.4 --sudo --tags=client-a
+  client-a-prod            18.0.4     /var/www/client-a/htdocs (run_as www-data)
+  client-a-preprod         18.0.4     /var/www/client-a-preprod/htdocs (run_as www-data)
+Instances to add, comma separated [client-a-prod,client-a-preprod]:
+Added 2 instance(s) of web-client-a to ~/.config/dolifleet/inventory.yaml. Next: dolifleet check server:web-client-a
+```
+
+`--sudo` searches as root, needed when `conf.php` is only readable by its owner. In a script,
+give the instances to add (`--instances=client-a-prod`) and, for a new server,
+`--accept-host-key`. The server block is appended to the inventory, comments kept:
+
+```yaml
+servers:
+  web-client-a:
+    php: '/usr/bin/php7.4'
+    instances:
+      client-a-prod:
+        htdocs: '/var/www/client-a/htdocs'
+        run_as: 'www-data'
+        tags: ['client-a']
+      client-a-preprod:
+        htdocs: '/var/www/client-a-preprod/htdocs'
+        run_as: 'www-data'
+        tags: ['client-a']
+```
+
+Then add the tag `prod` by hand to the production instances (protected by default), and
+`web_php`, `dolibarr_user` or `maintenance_login` when needed.
+
 ## Development
 
 ```
