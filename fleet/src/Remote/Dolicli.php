@@ -42,6 +42,22 @@ final class Dolicli
         return null !== $check && ($check['data']['installed_version'] ?? null) === $this->body->version();
     }
 
+    /**
+     * Arguments a job needs to find its instance by itself (it runs without the pilot).
+     *
+     * @param list<string> $arguments
+     * @return list<string>
+     */
+    public function jobArguments(Instance $instance, array $arguments): array
+    {
+        $arguments = array_merge($arguments, ['--format=json', '--dolpath='.$instance->htdocs]);
+        if ('' !== $instance->dolibarrUser && ! $this->hasOption($arguments, 'as')) {
+            $arguments[] = '--as='.$instance->dolibarrUser;
+        }
+
+        return $arguments;
+    }
+
     public function body(): Body
     {
         return $this->body;
@@ -56,9 +72,10 @@ final class Dolicli
      * Words of the remote command and its standard input.
      *
      * @param list<string> $arguments dolicli arguments (secrets included: they travel in the stream)
+     * @param array<string, string> $files Files sent along in the ephemeral mode ($DOLICLI_FILES)
      * @return array{server: string, command: list<string>, stdin: string}
      */
-    public function job(Instance $instance, array $arguments): array
+    public function job(Instance $instance, array $arguments, array $files = []): array
     {
         $arguments = array_merge($arguments, ['--format=json', '--dolpath='.$instance->htdocs]);
         if ('' !== $instance->dolibarrUser && ! $this->hasOption($arguments, 'as')) {
@@ -91,7 +108,7 @@ final class Dolicli
             return ['server' => $instance->server, 'command' => array_merge($prefix, [self::INSTALLED_LAUNCHER], array_values($arguments)), 'stdin' => $stdin];
         }
 
-        return ['server' => $instance->server, 'command' => array_merge($prefix, [$php, '--']), 'stdin' => $this->body->stream($arguments)];
+        return ['server' => $instance->server, 'command' => array_merge($prefix, [$php, '--']), 'stdin' => $this->body->stream($arguments, $files)];
     }
 
     /**
@@ -111,10 +128,11 @@ final class Dolicli
 
     /**
      * @param list<string> $arguments
+     * @param array<string, string> $files
      */
-    public function run(Instance $instance, array $arguments, int $timeout = 600): Outcome
+    public function run(Instance $instance, array $arguments, int $timeout = 600, array $files = []): Outcome
     {
-        $job = $this->job($instance, $arguments);
+        $job = $this->job($instance, $arguments, $files);
 
         return Outcome::from($instance, $this->transport->run($job['server'], $job['command'], $job['stdin'], $timeout));
     }

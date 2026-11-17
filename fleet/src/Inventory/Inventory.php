@@ -44,6 +44,14 @@ final class Inventory
     /** @var list<string> */
     private array $files = [];
 
+    /**
+     * No inventory yet (dolifleet add on a new workstation).
+     */
+    public static function empty(): self
+    {
+        return new self();
+    }
+
     public static function load(string $file): self
     {
         $inventory = new self();

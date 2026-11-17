@@ -78,6 +78,8 @@ final class Registry
             \Dolicli\Command\Monitor\DiscoverCommand::class,
             \Dolicli\Command\Setup\InstallCommand::class,
             \Dolicli\Command\Setup\UninstallCommand::class,
+            \Dolicli\Command\Job\StartCommand::class,
+            \Dolicli\Command\Job\StatusCommand::class,
             \Dolicli\Command\System\UpgradeCommand::class,
             \Dolicli\Command\Upgrade\StatusCommand::class,
             \Dolicli\Command\Upgrade\DeployCommand::class,

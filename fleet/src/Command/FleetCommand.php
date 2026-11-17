@@ -88,7 +88,9 @@ abstract class FleetCommand extends Command
 
     protected function transport(): Transport
     {
-        return $this->transport ??= new SshTransport((int) ($this->inventory()->default('ssh_timeout') ?? 10));
+        $timeout = is_file(Paths::inventory()) ? (int) ($this->inventory()->default('ssh_timeout') ?? 10) : 10;
+
+        return $this->transport ??= new SshTransport($timeout);
     }
 
     /**

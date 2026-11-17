@@ -2,7 +2,7 @@
 # Test double of ssh: runs the remote command on this machine, as the current account.
 # "ssh -G <alias>" answers the configuration; the alias "unreachable" fails like a refused connection.
 if [ "$1" = "-G" ]; then
-    echo "user $(id -un)"
+    echo "user ${FAKE_SSH_USER:-$(id -un)}"
     echo "controlmaster false"
     exit 0
 fi

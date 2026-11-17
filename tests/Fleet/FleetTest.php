@@ -157,3 +157,62 @@ it('exits with 3 when no instance can be reached', function (): void {
     expect($result['code'])->toBe(3)
         ->and($result['json']['instances']['far']['error'])->toStartWith('SSH_FAILED');
 });
+
+it('switches the maintenance mode on a batch, witness first, with the login of the inventory', function (): void {
+    fleetInventory('', '[prod]');
+    $inventory = (string) file_get_contents(DOLICLI_TEST_TMP.'/fleet/inventory.yaml');
+    file_put_contents(DOLICLI_TEST_TMP.'/fleet/inventory.yaml', str_replace("        tags: [preprod]\n", "        tags: [preprod]\n        maintenance_login: admin\n", $inventory));
+
+    $on = fleetJson(['maintenance', 'on', 'dev2', '--yes']);
+    $status = server(['system', 'maintenance', 'status', '--format=json'], null, ['DOLPATH' => DOLICLI_DOLPATH]);
+    $off = fleetJson(['maintenance', 'off', 'dev2', '--yes']);
+
+    expect($on['code'])->toBe(0)
+        ->and($on['json']['instances']['dev2']['envelope']['data']['allowed_login'])->toBe('admin')
+        ->and(json_decode($status['out'], true)['data']['enabled'])->toBeTrue()
+        ->and($off['code'])->toBe(0)
+        ->and(dbValue("SELECT COUNT(*) FROM llx_const WHERE name = 'MAIN_ONLY_LOGIN_ALLOWED'"))->toBe(0);
+});
+
+it('starts a backup as a detached job and follows it until the end', function (): void {
+    $dir = DOLICLI_TEST_TMP.'/fleet-backup';
+    @mkdir($dir, 0700, true);
+
+    $started = fleetJson(['backup', 'dev2', '--database', '--dir='.$dir, '--yes']);
+    $job = (string) $started['json']['instances']['dev2']['envelope']['data']['id'];
+    $followed = fleetJson(['jobs', 'dev2', '--id='.$job, '--wait']);
+    $list = fleetJson(['jobs', 'dev2']);
+
+    expect($started['code'])->toBe(0)
+        ->and($followed['json']['instances']['dev2']['envelope']['data']['job']['state'])->toBe('done')
+        ->and($followed['json']['instances']['dev2']['envelope']['data']['job']['result']['ok'])->toBeTrue()
+        ->and(glob($dir.'/*-database.sql'))->toHaveCount(1)
+        ->and(array_column($list['json']['instances']['dev2']['envelope']['data']['jobs'], 'id'))->toContain($job);
+});
+
+it('installs dolicli on the servers with the instances.ini of the inventory', function (): void {
+    $result = fleet(['setup', 'dev1', '--yes', '--json'], null, ['FAKE_SSH_USER' => 'root']);
+    $json = json_decode($result['out'], true);
+    $dirs = serverEnvDirs();
+    $ini = (string) file_get_contents($dirs['DOLICLI_ETC_DIR'].'/instances.ini');
+
+    expect($result['code'])->toBe(0)
+        ->and($json['servers']['local-a']['ok'])->toBeTrue()
+        ->and(file_get_contents($dirs['DOLICLI_PREFIX'].'/lib/dolicli/dolicli.php'))->toBe(file_get_contents(DOLICLI_TEST_DIST.'/dolicli.php'))
+        ->and($ini)->toContain("[dev1]\nhtdocs = \"".DOLICLI_DOLPATH.'"')
+        ->and($ini)->toContain('[dev2]')
+        ->and((string) file_get_contents($dirs['DOLICLI_CRON_FILE']))->toContain('monitor collect --instance=dev1');
+});
+
+it('adds a server and the instances found on it to a new inventory', function (): void {
+    $file = DOLICLI_TEST_TMP.'/fleet/new/inventory.yaml';
+
+    $result = fleet(['add', 'local-b', '--root='.dirname(DOLICLI_DOLPATH, 2), '--php='.PHP_BINARY, '--instances=dolibarr-integration-sqlite', '--tags=preprod,client-x'], null, ['DOLIFLEET_INVENTORY' => $file]);
+    $inventory = Inventory::load($file);
+
+    expect($result['code'])->toBe(0)
+        ->and($inventory->instance('dolibarr-integration-sqlite')->htdocs)->toBe(DOLICLI_DOLPATH)
+        ->and($inventory->instance('dolibarr-integration-sqlite')->tags)->toBe(['preprod', 'client-x'])
+        ->and($inventory->servers())->toHaveKey('local-b')
+        ->and(fleet(['add', 'local-b'], null, ['DOLIFLEET_INVENTORY' => $file])['code'])->toBe(2);
+});

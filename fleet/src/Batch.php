@@ -48,7 +48,7 @@ final class Batch
     /**
      * @param array<string, Instance> $instances
      * @param list<string> $arguments dolicli arguments, command words first
-     * @param array{yes?: bool, dry_run?: bool, continue_on_error?: bool, target?: string} $options
+     * @param array{yes?: bool, dry_run?: bool, continue_on_error?: bool, target?: string, extra?: callable(Instance): list<string>, detach?: bool} $options
      * @return array<string, Outcome>
      */
     public function run(array $instances, array $arguments, array $options = []): array
@@ -66,6 +66,15 @@ final class Batch
         }
 
         if ('read' === $category || $dryRun) {
+            if (isset($options['extra'])) {
+                $outcomes = [];
+                foreach ($instances as $id => $instance) {
+                    $outcomes[$id] = $this->dolicli->run($instance, array_merge($arguments, ($options['extra'])($instance)));
+                }
+
+                return $outcomes;
+            }
+
             return $this->dolicli->runMany($instances, $arguments, (int) $this->inventory->default('parallel'));
         }
         if (count($instances) > 1 && (empty($entry['batch']) || 'destructive' === $category)) {
@@ -84,7 +93,16 @@ final class Batch
         $first = true;
         foreach ($instances as $id => $instance) {
             ($this->say)("{$id}: {$name}".($first && count($instances) > 1 ? ' (witness instance)' : ''));
-            $outcome = $this->dolicli->run($instance, array_merge($arguments, ['--yes']));
+            $instanceArguments = array_merge($arguments, isset($options['extra']) ? ($options['extra'])($instance) : [], ['--yes']);
+            if ( ! empty($options['detach'])) {
+                // Long operation: started detached on the server, followed with dolifleet jobs.
+                $jobId = $run.'-'.$id;
+                $outcome = $this->dolicli->run($instance, ['job', 'start', 'id='.$jobId, 'args='.json_encode($this->dolicli->jobArguments($instance, $instanceArguments))], 600, [
+                    'body' => $this->dolicli->body()->content(),
+                ]);
+            } else {
+                $outcome = $this->dolicli->run($instance, $instanceArguments);
+            }
             $outcomes[$id] = $outcome;
             $this->journal->result($run, $id, $name, $outcome->exitCode, $outcome->ok() ? 'ok' : $outcome->error);
             if ( ! $outcome->ok() && empty($options['continue_on_error'])) {
