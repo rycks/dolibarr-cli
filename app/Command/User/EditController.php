@@ -4,61 +4,67 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
-use Minicli\Command\CommandController;
-use Minicli\Input;
+use App\Support\Command;
+use User;
 
-class EditController extends CommandController
+class EditController extends Command
 {
-
     public function usage(): void
     {
-        $this->info("mandatory args:\n"
-            . " login=dolibarrlogin : choose dolibarr login\n"
-            . "options:\n"
-            . "  --lock    : lock account (disable)\n"
-            . "  --unlock  : unlock account (enable)\n"
-            . "  --force   : disable dolibarr password rules and force given set password");
+        $this->info('Lock or unlock a Dolibarr user account
+
+Usage:
+  ./dolibarr user edit login=LOGIN --lock
+  ./dolibarr user edit login=LOGIN --unlock
+
+Options:
+  --lock    - Disable the account
+  --unlock  - Enable the account
+  --help    - Display this help message
+
+To change a password, use ./dolibarr user password.');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-        $force = false;
-        $this->info('Change user from command line');
+        global $db;
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
-        if ($this->hasParam('login')) {
-            $login = $this->getParam('login');
+
+        $login = $this->param('login');
+        $lock = $this->hasFlag('lock');
+        $unlock = $this->hasFlag('unlock');
+        if (null === $login || '' === $login || $lock === $unlock) {
+            $this->usage();
+            $this->fail('Give login=LOGIN and exactly one of --lock, --unlock.');
+
+            return;
         }
 
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-        $u = new \User($db);
-        $res = $u->fetch('', $login);
-        if ($res) {
-            $res2 = null;
-            if ($this->hasFlag('lock')) {
-                $res2 = $u->setstatus(\User::STATUS_DISABLED);
-            }
-
-            if ($this->hasFlag('unlock')) {
-                $res2 = $u->setstatus(\User::STATUS_ENABLED);
-            }
-
-            if($res2 > 0) {
-                $this->display("User updated, new status is " . $u->getLibStatut(0));
-            } else {
-                $this->error("User not updated, new status is always " . $u->getLibStatut(0));
-            }
-        } else {
-            $this->error("Can't fetch user '$login' !");
+        if ( ! $this->requireDolibarr()) {
+            return;
         }
-    }
 
-    public function required(): array
-    {
-        return ['login'];
+        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        $u = new User($db);
+        $res = $u->fetch(0, $login);
+        if ($res <= 0) {
+            $this->fail(0 === $res ? "User '{$login}' not found." : "Cannot fetch user '{$login}': ".$u->error);
+
+            return;
+        }
+
+        $result = $u->setstatus($lock ? User::STATUS_DISABLED : User::STATUS_ENABLED);
+        if ($result < 0) {
+            $this->fail("User '{$login}' not updated: ".$u->error);
+
+            return;
+        }
+
+        $this->success("User '{$login}' is now ".($lock ? 'disabled' : 'enabled').'.');
     }
 }

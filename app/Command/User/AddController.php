@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
-use Minicli\Command\CommandController;
-use Minicli\Input;
-use App\Util\DolibarrHelper;
+use App\Support\Command;
+use User;
 
-class AddController extends CommandController
+class AddController extends Command
 {
     public function usage(): void
     {
-        $this->info("Add a new Dolibarr user
+        $this->info('Add a new Dolibarr user
 
 Usage:
-  ./dolibarr user add login=USERNAME firstname=FIRST lastname=LAST [password=PASS] [email=EMAIL]
+  ./dolibarr user add login=USERNAME firstname=FIRST lastname=LAST [email=EMAIL] [admin=0|1]
 
 Mandatory parameters:
   login=USERNAME     - User login (unique)
@@ -23,132 +22,117 @@ Mandatory parameters:
   lastname=LAST      - User last name
 
 Optional parameters:
-  password=PASS      - User password (if not set, will be asked interactively)
   email=EMAIL        - User email address
   admin=0|1          - Set user as admin (1) or not (0), default: 0
+  password=PASS      - User password. Avoid it: the password stays in the shell history
+                       and is visible to other users in the process list (ps)
 
 Options:
+  --password-stdin   - Read the password from standard input (scripts)
   --help             - Display this help message
+
+Without password= nor --password-stdin, the password is asked without echo.
 
 Examples:
   ./dolibarr user add login=jdoe firstname=John lastname=Doe
-  ./dolibarr user add login=jdoe firstname=John lastname=Doe password=mypass123
-  ./dolibarr user add login=admin2 firstname=Super lastname=Admin admin=1 email=admin@example.com");
+  echo "$PASS" | ./dolibarr user add login=jdoe firstname=John lastname=Doe --password-stdin
+  ./dolibarr user add login=admin2 firstname=Super lastname=Admin admin=1 email=admin@example.com');
     }
 
     public function handle(): void
     {
-        global $db, $conf, $user;
-
-        $this->info('Add a new Dolibarr user');
+        global $db, $conf;
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        // Check mandatory parameters
-        if (!$this->hasParam('login')) {
-            $this->error("Parameter 'login' is required!");
-            $this->usage();
-            return;
-        }
+        foreach (['login', 'firstname', 'lastname'] as $required) {
+            if (null === $this->param($required) || '' === trim((string) $this->param($required))) {
+                $this->usage();
+                $this->fail("Parameter '{$required}' is required.");
 
-        if (!$this->hasParam('firstname')) {
-            $this->error("Parameter 'firstname' is required!");
-            $this->usage();
-            return;
-        }
-
-        if (!$this->hasParam('lastname')) {
-            $this->error("Parameter 'lastname' is required!");
-            $this->usage();
-            return;
-        }
-
-        // Get parameters
-        $login = $this->getParam('login');
-        $firstname = $this->getParam('firstname');
-        $lastname = $this->getParam('lastname');
-        $email = $this->getParam('email') ?? '';
-        $admin = $this->getParam('admin') ?? '0';
-
-        // Get or ask for password
-        if ($this->hasParam('password')) {
-            $password = $this->getParam('password');
-        } else {
-            $password = "";
-            while (trim($password) == "") {
-                $input = new Input("Please enter the password for user '$login': ");
-                $password = $input->read();
-            }
-        }
-
-        $this->display("Creating user '$login' ($firstname $lastname)...");
-
-        // Create a user object if not exists (required for user creation)
-        if (!isset($user) || !is_object($user)) {
-            $user = DolibarrHelper::getFirstSuperAdminUser();
-            if (!$user) {
-                $this->error("No super admin user found! Cannot create user.");
-                $this->info("Please ensure at least one active super admin exists.");
                 return;
             }
         }
 
-        // Create new user object
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-        $newuser = new \User($db);
+        $login = (string) $this->param('login');
+        $admin = $this->param('admin') ?? '0';
+        if ( ! in_array($admin, ['0', '1'], true)) {
+            $this->fail("Invalid admin={$admin}: use 0 or 1.");
 
-        // Check if user already exists
-        $result = $newuser->fetch('', $login);
-        if ($result > 0) {
-            $this->error("User with login '$login' already exists!");
-            $this->info("Please choose a different login.");
             return;
         }
 
-        // Set user properties
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
+
+        $actingUser = $this->actingUser();
+        if (null === $actingUser) {
+            return;
+        }
+
+        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        $newuser = new User($db);
+        $exists = $newuser->fetch(0, $login);
+        if ($exists < 0) {
+            $this->fail("Cannot check whether user '{$login}' exists: ".$newuser->error);
+
+            return;
+        }
+        if ($exists > 0) {
+            $this->fail("User with login '{$login}' already exists.");
+
+            return;
+        }
+
+        $password = $this->param('password') ?? $this->askSecret("Password for user '{$login}': ");
+        if (null === $password) {
+            return;
+        }
+
+        $this->display("Creating user '{$login}' (".$this->param('firstname').' '.$this->param('lastname').')...');
+
+        $newuser = new User($db);
         $newuser->login = $login;
-        $newuser->firstname = $firstname;
-        $newuser->lastname = $lastname;
-        $newuser->email = $email;
-        $newuser->admin = (int)$admin;
-        $newuser->entity = $conf->entity;
+        $newuser->firstname = (string) $this->param('firstname');
+        $newuser->lastname = (string) $this->param('lastname');
+        $newuser->email = (string) ($this->param('email') ?? '');
+        $newuser->admin = (int) $admin;
+        $newuser->entity = (int) $conf->entity;
 
-        // Create the user
-        $result = $newuser->create($user);
+        // Create the user and set its password together: no user without a valid password.
+        $db->begin();
+        $result = $newuser->create($actingUser);
+        if ($result <= 0) {
+            $db->rollback();
+            $this->fail("Failed to create user '{$login}': ".$this->errorsOf($newuser));
 
-        if ($result > 0) {
-            $this->success("User '$login' created successfully!");
-            $this->display("User ID: " . $newuser->id);
+            return;
+        }
 
-            // Set password
-            $newuser->setPassword($user, $password);
-            $this->display("Password set for user '$login'");
+        $passResult = $newuser->setPassword($actingUser, $password);
+        if ( ! is_string($passResult)) {
+            $db->rollback();
+            $this->fail("User '{$login}' not created: password rejected by Dolibarr password rules (".$this->errorsOf($newuser).').');
 
-            if ($newuser->admin == 1) {
-                $this->info("User has administrator rights.");
-            }
+            return;
+        }
+        $db->commit();
 
-            if (!empty($email)) {
-                $this->display("Email: $email");
-            }
-        } else {
-            $this->error("Failed to create user '$login'");
-            if ($newuser->error) {
-                $this->error("Error: " . $newuser->error);
-            }
-            if (is_array($newuser->errors) && count($newuser->errors) > 0) {
-                foreach ($newuser->errors as $error) {
-                    $this->error("- $error");
-                }
-            }
+        $this->success("User '{$login}' created (id ".$newuser->id.').');
+        if (1 === (int) $newuser->admin) {
+            $this->info('User has administrator rights.');
         }
     }
 
-    public function required(): array
+    private function errorsOf(User $user): string
     {
-        return [];
+        $errors = array_filter(array_merge([(string) $user->error], (array) $user->errors));
+
+        return [] === $errors ? 'unknown error' : strip_tags(implode(', ', array_unique($errors)));
     }
 }

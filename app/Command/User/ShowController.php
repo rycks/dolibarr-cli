@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
+use User;
+use UserGroup;
 
-class ShowController extends CommandController
+class ShowController extends Command
 {
+    private const RULE = "===========================================================\n";
+
     public function usage(): void
     {
-        $this->info("Display detailed information about a Dolibarr user
+        $this->info('Display detailed information about a Dolibarr user
 
 Usage:
   ./dolibarr user show login=USERNAME
@@ -19,180 +23,148 @@ Parameters:
   login=USERNAME     - User login to display
 
 Options:
-  --help             - Display this help message
-
-Examples:
-  ./dolibarr user show login=admin
-  ./dolibarr user show login=jdoe");
+  --help             - Display this help message');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-
-        $this->info('Display Dolibarr user details');
+        global $db;
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        // Check mandatory parameter
-        if (!$this->hasParam('login')) {
-            $this->error("Parameter 'login' is required!");
+        $login = $this->param('login');
+        if (null === $login || '' === $login) {
             $this->usage();
+            $this->fail("Parameter 'login' is required.");
+
             return;
         }
 
-        $login = $this->getParam('login');
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
 
-        // Load user class
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-        $user = new \User($db);
-
-        // Fetch the user
-        $result = $user->fetch('', $login);
-
+        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        require_once DOL_DOCUMENT_ROOT.'/user/class/usergroup.class.php';
+        $u = new User($db);
+        $result = $u->fetch(0, $login);
         if ($result <= 0) {
-            $this->error("User '$login' not found!");
-            $this->info("Please check the login and try again.");
+            $this->fail(0 === $result ? "User '{$login}' not found." : "Cannot fetch user '{$login}': ".$u->error);
+
             return;
         }
 
-        // Display user information
-        $this->rawOutput("\n═══════════════════════════════════════════════════════════\n");
-        $this->rawOutput("  USER DETAILS\n");
-        $this->rawOutput("═══════════════════════════════════════════════════════════\n\n");
+        $isAdmin = 1 === (int) $u->admin;
+        $isSuperAdmin = $isAdmin && 0 === (int) $u->entity;
 
-        // Basic Information
-        $this->rawOutput("BASIC INFORMATION:\n");
-        $this->rawOutput("  ID:              " . $user->id . "\n");
-        $this->rawOutput("  Login:           " . $user->login . "\n");
-        $this->rawOutput("  First name:      " . ($user->firstname ?: '(not set)') . "\n");
-        $this->rawOutput("  Last name:       " . ($user->lastname ?: '(not set)') . "\n");
-        $this->rawOutput("  Full name:       " . $user->getFullName($user) . "\n");
+        $this->rawOutput("\n".self::RULE."  USER DETAILS\n".self::RULE."\n");
 
-        // Contact Information
-        $this->rawOutput("\nCONTACT INFORMATION:\n");
-        $this->rawOutput("  Email:           " . ($user->email ?: '(not set)') . "\n");
-        $this->rawOutput("  Phone (office):  " . ($user->office_phone ?: '(not set)') . "\n");
-        $this->rawOutput("  Phone (mobile):  " . ($user->user_mobile ?: '(not set)') . "\n");
-        $this->rawOutput("  Fax:             " . ($user->office_fax ?: '(not set)') . "\n");
+        $this->section('BASIC INFORMATION', [
+            'ID' => (string) $u->id,
+            'Login' => (string) $u->login,
+            'First name' => $this->orNotSet($u->firstname),
+            'Last name' => $this->orNotSet($u->lastname),
+            'Full name' => $u->getFullName($GLOBALS['langs']),
+        ]);
 
-        // Status & Permissions
-        $this->rawOutput("\nSTATUS & PERMISSIONS:\n");
-        $statusLabel = $user->getLibStatut(5);
-        $statusText = strip_tags($statusLabel);
-        $statusDisplay = ($user->statut == 1) ? "  Status:          " . $statusText . "\n" : "  Status:          " . $statusText . " ✗\n";
-        $this->rawOutput($statusDisplay);
+        $this->section('CONTACT INFORMATION', [
+            'Email' => $this->orNotSet($u->email),
+            'Phone (office)' => $this->orNotSet($u->office_phone),
+            'Phone (mobile)' => $this->orNotSet($u->user_mobile),
+            'Fax' => $this->orNotSet($u->office_fax),
+        ]);
 
-        $adminLabel = ($user->admin == 1) ? 'Yes (Administrator)' : 'No';
-        $this->rawOutput("  Admin rights:    " . $adminLabel . "\n");
-        $this->rawOutput("  Super admin:     " . (($user->admin == 1) ? 'Yes' : 'No') . "\n");
-        $this->rawOutput("  Entity:          " . $user->entity . "\n");
+        $this->section('STATUS & PERMISSIONS', [
+            'Status' => 1 === (int) $u->statut ? 'Enabled' : 'Disabled',
+            'Admin rights' => $isAdmin ? 'Yes' : 'No',
+            'Super admin' => $isSuperAdmin ? 'Yes (all entities)' : 'No',
+            'Entity' => (string) $u->entity,
+        ]);
 
-        // Authentication
-        $this->rawOutput("\nAUTHENTICATION:\n");
-        $hasApiKey = !empty($user->api_key);
-        if ($hasApiKey) {
-            $this->rawOutput("  API Token:       Set (xxxxx)\n");
+        $this->section('AUTHENTICATION', [
+            'API key' => empty($u->api_key) ? 'Not set' : 'Set',
+            'Auth mode' => $u->auth_mode ?: 'dolibarr',
+        ]);
+
+        $this->section('ACCOUNT DATES', array_filter([
+            'Created' => $u->datec ? dol_print_date($u->datec, 'dayhour') : null,
+            'Modified' => $u->datem ? dol_print_date($u->datem, 'dayhour') : null,
+            'Last login' => $u->datelastlogin ? dol_print_date($u->datelastlogin, 'dayhour') : '(never)',
+            'Previous login' => $u->datepreviouslogin ? dol_print_date($u->datepreviouslogin, 'dayhour') : null,
+        ], static fn ($v): bool => null !== $v));
+
+        $this->section('ADDITIONAL INFORMATION', [
+            'Job' => $this->orNotSet($u->job),
+            'Signature' => $u->signature ? 'Set' : '(not set)',
+            'Note (public)' => $u->note_public ? 'Set' : '(not set)',
+            'Note (private)' => $u->note_private ? 'Set' : '(not set)',
+        ]);
+
+        $location = trim(($u->zip ?: '').' '.($u->town ?: ''));
+        $address = array_filter([
+            'Address' => $u->address ?: null,
+            'City' => '' !== $location ? $location : null,
+            'State' => $u->state_code ?: null,
+            'Country' => $u->country_code ?: null,
+        ]);
+        if ([] !== $address) {
+            $this->section('ADDRESS', $address);
+        }
+
+        $u->getrights();
+        $groupObject = new UserGroup($db);
+        $groups = $groupObject->listGroupsForUser($u->id, false);
+        $groupNames = is_array($groups) ? array_map(static fn ($g): string => (string) $g->name, $groups) : [];
+
+        $this->rawOutput("RIGHTS & GROUPS:\n");
+        $this->rawOutput($this->line('Permissions', $this->countRights($u->rights ?? null).' permission(s)'));
+        if ([] === $groupNames) {
+            $this->rawOutput($this->line('Groups', 'No groups'));
         } else {
-            $this->rawOutput("  API Token:       Not set\n");
-        }
-
-        $authMode = $user->auth_mode ?: 'dolibarr';
-        $this->rawOutput("  Auth mode:       " . $authMode . "\n");
-
-        // Account Dates
-        $this->rawOutput("\nACCOUNT DATES:\n");
-        if ($user->datec) {
-            $this->rawOutput("  Created:         " . dol_print_date($user->datec, 'dayhour') . "\n");
-        }
-        if ($user->datem) {
-            $this->rawOutput("  Modified:        " . dol_print_date($user->datem, 'dayhour') . "\n");
-        }
-        if ($user->datelastlogin) {
-            $this->rawOutput("  Last login:      " . dol_print_date($user->datelastlogin, 'dayhour') . "\n");
-        } else {
-            $this->rawOutput("  Last login:      (never)\n");
-        }
-        if ($user->datepreviouslogin) {
-            $this->rawOutput("  Previous login:  " . dol_print_date($user->datepreviouslogin, 'dayhour') . "\n");
-        }
-
-        // Additional Information
-        $this->rawOutput("\nADDITIONAL INFORMATION:\n");
-        $this->rawOutput("  Job:             " . ($user->job ?: '(not set)') . "\n");
-        $this->rawOutput("  Signature:       " . ($user->signature ? 'Set' : '(not set)') . "\n");
-        $this->rawOutput("  Note (public):   " . ($user->note_public ? 'Set' : '(not set)') . "\n");
-        $this->rawOutput("  Note (private):  " . ($user->note_private ? 'Set' : '(not set)') . "\n");
-
-        // Address
-        if (!empty($user->address) || !empty($user->zip) || !empty($user->town) || !empty($user->state_code) || !empty($user->country_code)) {
-            $this->rawOutput("\nADDRESS:\n");
-            if ($user->address) {
-                $this->rawOutput("  Address:         " . $user->address . "\n");
-            }
-            $location = trim(($user->zip ?: '') . ' ' . ($user->town ?: ''));
-            if ($location) {
-                $this->rawOutput("  City:            " . $location . "\n");
-            }
-            if ($user->state_code) {
-                $this->rawOutput("  State:           " . $user->state_code . "\n");
-            }
-            if ($user->country_code) {
-                $this->rawOutput("  Country:         " . $user->country_code . "\n");
+            $this->rawOutput($this->line('Groups', count($groupNames).' group(s)'));
+            foreach ($groupNames as $name) {
+                $this->rawOutput(str_repeat(' ', 19).'- '.$name."\n");
             }
         }
 
-        // Rights & Groups
-        $this->rawOutput("\nRIGHTS & GROUPS:\n");
-
-        // Get user's rights
-        $user->getrights();
-        $rightsCount = 0;
-        if (isset($user->rights) && is_object($user->rights)) {
-            $rightsCount = $this->countRights($user->rights);
-        }
-        $this->rawOutput("  Permissions:     " . $rightsCount . " permission(s) set\n");
-
-        // Get user's groups
-        $user->fetchAll('', '', 0, 0, array('customsql' => "ug.fk_user = " . $user->id));
-        if (!empty($user->users_group_list)) {
-            $this->rawOutput("  Groups:          " . count($user->users_group_list) . " group(s)\n");
-            foreach ($user->users_group_list as $group) {
-                $this->rawOutput("                   - " . $group['name'] . "\n");
-            }
-        } else {
-            $this->rawOutput("  Groups:          No groups\n");
-        }
-
-        $this->rawOutput("\n═══════════════════════════════════════════════════════════\n");
+        $this->rawOutput("\n".self::RULE);
     }
 
     /**
-     * Count permissions recursively
-     *
-     * @param object $rights Rights object
-     * @return int Number of permissions
+     * @param  array<string, string>  $lines
      */
-    private function countRights($rights): int
+    private function section(string $title, array $lines): void
+    {
+        $this->rawOutput($title.":\n");
+        foreach ($lines as $label => $value) {
+            $this->rawOutput($this->line($label, $value));
+        }
+        $this->rawOutput("\n");
+    }
+
+    private function line(string $label, string $value): string
+    {
+        return '  '.str_pad($label.':', 17).$value."\n";
+    }
+
+    private function orNotSet(mixed $value): string
+    {
+        return (null === $value || '' === $value) ? '(not set)' : (string) $value;
+    }
+
+    private function countRights(mixed $rights): int
     {
         $count = 0;
         if (is_object($rights)) {
-            foreach ($rights as $key => $value) {
-                if (is_object($value)) {
-                    $count += $this->countRights($value);
-                } elseif ($value == 1) {
-                    $count++;
-                }
+            foreach ((array) $rights as $value) {
+                $count += is_object($value) ? $this->countRights($value) : (1 === (int) $value ? 1 : 0);
             }
         }
-        return $count;
-    }
 
-    public function required(): array
-    {
-        return [];
+        return $count;
     }
 }

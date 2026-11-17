@@ -4,72 +4,81 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
-use Minicli\Command\CommandController;
-use Minicli\Input;
+use App\Support\Command;
+use User;
 
-class PasswordController extends CommandController
+class PasswordController extends Command
 {
-
     public function usage(): void
     {
-        $this->info("mandatory args:\n"
-            . " login=dolibarrlogin : choose dolibarr login\n"
-            . " newpass=xxxx : the password, if not set script will ask it as interactive\n\n"
-            . "options:\n"
-            . "  --help  : display this help\n"
-            . "  --force : disable dolibarr password rules and force given set password");
+        $this->info('Change the password of a Dolibarr user
+
+Usage:
+  ./dolibarr user password login=LOGIN [--force]
+
+Parameters:
+  login=LOGIN        - Dolibarr login (required)
+  newpass=PASS       - New password. Avoid it: the password stays in the shell history
+                       and is visible to other users in the process list (ps)
+
+Options:
+  --password-stdin   - Read the new password from standard input (scripts)
+  --force            - Bypass the Dolibarr password rules (length, complexity)
+  --help             - Display this help message
+
+Without newpass= nor --password-stdin, the password is asked without echo.');
     }
 
     public function handle(): void
     {
         global $db, $conf;
-        $force = false;
-        $this->info('Change user password from command line');
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
+            return;
+        }
+
+        $login = $this->param('login');
+        if (null === $login || '' === $login) {
+            $this->usage();
+            $this->fail("Parameter 'login' is required.");
+
+            return;
+        }
+
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
+
+        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        $u = new User($db);
+        $res = $u->fetch(0, $login);
+        if ($res <= 0) {
+            $this->fail(0 === $res ? "User '{$login}' not found." : "Cannot fetch user '{$login}': ".$u->error);
+
+            return;
+        }
+
+        $newpass = $this->param('newpass') ?? $this->askSecret("New password for '{$login}': ");
+        if (null === $newpass) {
             return;
         }
 
         if ($this->hasFlag('force')) {
-            $force = true;
+            // Without a password generator configured, setPassword() applies no rule.
+            $conf->global->USER_PASSWORD_GENERATED = '';
         }
 
-        if ($this->hasParam('login')) {
-            $login = $this->getParam('login');
-        }
-        if ($this->hasParam('newpass')) {
-            $newpass = $this->getParam('newpass');
-        } else {
-            $newpass = "";
-            while (trim($newpass) == "") {
-                $input = new Input("Please enter the new password : ");
-                $newpass = $input->read();
-            }
-        }
-        $this->display("We will try to change password for user '$login' with the new password '$newpass'");
+        $actingUser = $this->actingUser() ?? $u;
+        $result = $u->setPassword($actingUser, $newpass);
+        if ( ! is_string($result)) {
+            $this->fail("Cannot change password for user '{$login}': ".strip_tags($u->error ?: 'unknown error'));
+            $this->info('Check the password rules (Home > Setup > Security > Passwords) or use --force.');
 
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
-        $u = new \User($db);
-        $res = $u->fetch('', $login);
-        if ($res) {
-            if ($force) {
-                $conf->global->USER_PASSWORD_GENERATED = 'none';
-            }
-            $res2 = $u->setPassword($u, $newpass);
-            if ($res2 == $newpass) {
-                $this->display("New password is set for '$login'");
-            } else {
-                $this->error("Can't change password for user '$login'");
-                $this->info("Please have a look on dolibarr password setup (admin >> security >> passwords)!");
-            }
-        } else {
-            $this->error("Can't fetch user '$login' !");
+            return;
         }
-    }
 
-    public function required(): array
-    {
-        return ['login'];
+        $this->success("New password set for '{$login}'.");
     }
 }
