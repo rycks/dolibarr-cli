@@ -161,6 +161,7 @@ return [
     'journal.phase.result' => 'résultat',
     'journal.phase.intention' => 'intention',
 
+    'module.excluded' => 'arrête Dolibarr au chargement : mis de côté (Entrée pour le détail)',
     'instance.unknown' => 'L\'instance %s n\'est plus dans l\'inventaire.',
     'instance.loading' => 'chargement...',
     'instance.empty' => 'Rien à afficher.',
@@ -339,6 +340,7 @@ return [
     'error.sudo.why' => 'aucune règle sudo NOPASSWD pour %1$s sur %2$s.',
     'error.locked.why' => 'une autre opération détient le verrou de cette instance.',
     'error.database.why' => 'Dolibarr ne joint pas sa base de données (conf.php).',
+    'error.descriptor.why' => 'le descripteur du module %1$s (%2$s) arrête Dolibarr à son chargement ; module list le met de côté et liste les autres.',
     'error.dolibarr.why' => 'Dolibarr s\'est arrêté au chargement (un module ou la configuration).',
     'error.rechecking' => 'nouvelle vérification...',
     'error.fixed' => 'Vérifié : cela fonctionne maintenant.',

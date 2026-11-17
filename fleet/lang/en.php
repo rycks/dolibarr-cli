@@ -161,6 +161,7 @@ return [
     'journal.phase.result' => 'result',
     'journal.phase.intention' => 'intention',
 
+    'module.excluded' => 'stops Dolibarr when loaded: left out (Enter for the detail)',
     'instance.unknown' => 'Instance %s is not in the inventory any more.',
     'instance.loading' => 'loading...',
     'instance.empty' => 'Nothing to show.',
@@ -339,6 +340,7 @@ return [
     'error.sudo.why' => 'no NOPASSWD sudo rule for %1$s on %2$s.',
     'error.locked.why' => 'another operation holds the lock of this instance.',
     'error.database.why' => 'Dolibarr cannot reach its database (conf.php).',
+    'error.descriptor.why' => 'the descriptor of module %1$s (%2$s) stops Dolibarr while it is loaded; module list leaves it out and lists the others.',
     'error.dolibarr.why' => 'Dolibarr stopped while loading (a module or the configuration).',
     'error.rechecking' => 'checking again...',
     'error.fixed' => 'Checked: it works now.',

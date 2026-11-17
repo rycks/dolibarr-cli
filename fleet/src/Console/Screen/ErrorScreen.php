@@ -38,7 +38,10 @@ final class ErrorScreen extends Screen
     /**
      * Error of an instance (refresh, list, command): explanation from the error code.
      */
-    public static function forInstance(App $app, string $id, string $error, string $stderr): self
+    /**
+     * @param array<string, mixed> $details Details of the dolicli error (file and module being loaded, output)
+     */
+    public static function forInstance(App $app, string $id, string $error, string $stderr, array $details = []): self
     {
         $t = $app->t;
         $code = (string) strtok($error, ':');
@@ -81,13 +84,15 @@ final class ErrorScreen extends Screen
             case 'PREMATURE_EXIT':
             case 'FATAL_ERROR':
             case 'INTERNAL_ERROR':
-                $why = $t->t('error.dolibarr.why');
-                $fix = ['dolifleet exec '.$id.' -- env doctor'];
+                $file = (string) ($details['file'] ?? '');
+                $why = '' !== $file ? $t->t('error.descriptor.why', (string) ($details['module'] ?? '?'), $file) : $t->t('error.dolibarr.why');
+                $fix = '' !== $file ? ['dolifleet exec '.$id.' -- module list'] : ['dolifleet exec '.$id.' -- env doctor'];
                 break;
             default:
                 $fix = ['dolifleet check '.$id];
         }
-        $proof = array_slice(array_values(array_filter(array_map('rtrim', explode("\n", $stderr)), static fn (string $l): bool => '' !== $l)), -3);
+        $output = array_values(array_map('strval', (array) ($details['output'] ?? [])));
+        $proof = [] !== $output ? array_slice($output, -10) : array_slice(array_values(array_filter(array_map('rtrim', explode("\n", $stderr)), static fn (string $l): bool => '' !== $l)), -3);
 
         return new self($id, $error, $why, $where, $fix, $proof, ['check', $id], $app->isProd($id));
     }
@@ -99,7 +104,9 @@ final class ErrorScreen extends Screen
     {
         $instance = $task->instances[0] ?? '';
         if ('' !== $instance && 1 === count($task->instances)) {
-            return self::forInstance($app, $instance, $task->error(), $task->stderr);
+            $details = $task->outcome($instance)['envelope']['errors'][0]['details'] ?? [];
+
+            return self::forInstance($app, $instance, $task->error(), $task->stderr, is_array($details) ? $details : []);
         }
 
         return new self($instance, $task->error(), '', '', [$task->commandLine()], $task->stderrTail(3), null);

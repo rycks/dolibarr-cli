@@ -536,3 +536,33 @@ it('opens the journal of an instance with l, from the fleet and from the card', 
     press($app, ['1', 'l']);
     expect(screenOf($app)[1])->toBe(' $ dolifleet log dev1');
 });
+
+it('lists a module that stops Dolibarr as a line of the modules tab, and names its file in the error', function (): void {
+    [$app, $backend] = consoleApp();
+    press($app, ['enter', '2']);
+    screenOf($app);
+    $modules = $backend->last(['exec', 'dev1', '--', 'module', 'list', '--external']);
+    $backend->finish($modules, ['instances' => ['dev1' => ['ok' => true, 'envelope' => [
+        'data' => ['modules' => [['class' => 'modStripe', 'name' => 'Stripe', 'version' => '2.1.0', 'active' => true, 'external' => true, 'publisher' => 'Stripe']],
+            'excluded' => [['class' => 'modSmartXxx', 'file' => '/var/www/custom/smartxxx/core/modules/modSmartXxx.class.php', 'reason' => 'ended the process (exit or die)']]],
+        'warnings' => [['code' => 'MODULE_DESCRIPTOR_FAILED', 'message' => 'Module modSmartXxx left out of the list']],
+    ]]]]);
+    $app->tick();
+    $tab = implode("\n", screenOf($app));
+    expect($tab)->toContain('!! modSmartXxx')
+        ->and($tab)->toContain('arrête Dolibarr au chargement')
+        ->and($tab)->toContain('Stripe')
+        ->and($tab)->not->toContain('left out of the list');
+    press($app, ['enter']);
+    expect(implode("\n", screenOf($app)))->toContain('ended the process (exit or die)');
+
+    $failed = new Task('x', ['exec', 'dev1', '--', 'system', 'status'], 'palette', ['dev1'], false, microtime(true));
+    $failed->exitCode = 3;
+    $failed->json = ['instances' => ['dev1' => ['ok' => false, 'error' => 'PREMATURE_EXIT: Dolibarr stopped while loading modSmartXxx.class.php', 'envelope' => ['ok' => false,
+        'errors' => [['code' => 'PREMATURE_EXIT', 'message' => 'stopped', 'details' => ['file' => '/var/www/custom/smartxxx/core/modules/modSmartXxx.class.php', 'module' => 'modSmartXxx', 'output' => ['Warning: cannot connect to license server']]]]]]]];
+    $app->push(ErrorScreen::forTask($app, $failed));
+    $error = implode("\n", screenOf($app));
+    expect($error)->toContain('le descripteur du module modSmartXxx')
+        ->and($error)->toContain('Warning: cannot connect to license server')
+        ->and($error)->toContain('dolifleet exec dev1 -- module list');
+});

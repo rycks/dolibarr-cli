@@ -119,7 +119,8 @@ final class InstanceScreen extends Screen implements TargetAware
         }
         $keys = [];
         $row = $app->row($this->id);
-        if (null !== $row && '' !== $row->unreachable) {
+        $failed = $this->loaded[$this->tab] ?? null;
+        if ((null !== $row && '' !== $row->unreachable) || (null !== $failed && Task::FAILED === $failed->state())) {
             $keys[] = ['e', $app->t->t('key.error')];
         }
         if (1 !== $this->tab) {
@@ -192,8 +193,11 @@ final class InstanceScreen extends Screen implements TargetAware
 
                 return true;
             case 'e':
+                $failed = $this->loaded[$this->tab] ?? null;
                 $row = $app->row($this->id);
-                if (null !== $row && '' !== $row->unreachable) {
+                if (null !== $failed && Task::FAILED === $failed->state()) {
+                    $app->push(ErrorScreen::forTask($app, $failed));
+                } elseif (null !== $row && '' !== $row->unreachable) {
                     $app->push(ErrorScreen::forInstance($app, $this->id, $row->unreachable, ''));
                 }
 
@@ -402,7 +406,10 @@ final class InstanceScreen extends Screen implements TargetAware
         }
         $warnings = [];
         foreach ((array) ($task->outcome($this->id)['envelope']['warnings'] ?? []) as $warning) {
-            $warnings[] = Line::of('  ! '.(string) ($warning['message'] ?? ''), 'warn');
+            // A module left out is already a line of the list.
+            if ('MODULE_DESCRIPTOR_FAILED' !== ($warning['code'] ?? '')) {
+                $warnings[] = Line::of('  ! '.(string) ($warning['message'] ?? ''), 'warn');
+            }
         }
         $lines = $this->table($app, $width, $height - count($warnings));
 
@@ -458,7 +465,19 @@ final class InstanceScreen extends Screen implements TargetAware
             default => 'backups',
         };
 
-        return array_values(array_filter((array) ($task->data($this->id)[$key] ?? []), 'is_array'));
+        $records = array_values(array_filter((array) ($task->data($this->id)[$key] ?? []), 'is_array'));
+        if ('modules' === $name) {
+            // Modules whose descriptor stops Dolibarr: left out by dolicli, listed here, first.
+            $excluded = [];
+            foreach ((array) ($task->data($this->id)['excluded'] ?? []) as $module) {
+                if (is_array($module)) {
+                    $excluded[] = ['name' => (string) ($module['class'] ?? ''), 'excluded' => true, 'external' => true, 'file' => (string) ($module['file'] ?? ''), 'reason' => (string) ($module['reason'] ?? '')];
+                }
+            }
+            $records = array_merge($excluded, $records);
+        }
+
+        return $records;
     }
 
     /**
@@ -476,6 +495,16 @@ final class InstanceScreen extends Screen implements TargetAware
                     ->column('active', $t->t('col.active'), 5, 6, 1)->column('external', $t->t('col.external'), 5, 7, 3)
                     ->column('publisher', $t->t('col.publisher'), 8, 40, 4, 'left', true);
                 foreach ($records as $module) {
+                    if ( ! empty($module['excluded'])) {
+                        $table->row([
+                            'name' => Line::of('!! '.(string) $module['name'], 'crit'),
+                            'version' => '-',
+                            'active' => '?',
+                            'external' => $t->t('value.yes'),
+                            'publisher' => Line::of($t->t('module.excluded'), 'crit'),
+                        ]);
+                        continue;
+                    }
                     $table->row([
                         'name' => (string) ($module['name'] ?? $module['class'] ?? ''),
                         'version' => (string) ($module['version'] ?? ''),
