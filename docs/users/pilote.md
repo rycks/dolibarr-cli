@@ -213,4 +213,12 @@ dolifleet serve
 
 Le tableau de bord écoute sur `127.0.0.1`, sur un port libre choisi au démarrage, et s'arrête avec la commande. Ouvrez l'adresse affichée : le jeton qu'elle contient est échangé contre un cookie, puis retiré de l'adresse. Les en-têtes `Host` et `Origin` sont vérifiés, la page pose une politique de sécurité stricte et ne charge aucune ressource externe, et toutes les données venues des serveurs sont échappées.
 
-Contenu : vue du parc (statut, versions, maintenance, sessions, âge de la sauvegarde, intégrité des fichiers, fraîcheur des données), fiche d'instance (contrôles, historique, journal), actions (maintenance, collecte, sauvegarde) avec les mêmes garde-fous que la ligne de commande, inventaire (affichage et validation). Les actions s'exécutent en tâche de fond et se suivent dans la page Tâches.
+Le tableau de bord est le miroir de la console : mêmes mots, mêmes signes, même langue (`dolifleet serve --lang=fr`, puis le même ordre de choix que la console), et la commande équivalente en haut de chaque page.
+
+- Parc : instances triées par gravité, avec version, PHP, état, âge de la sauvegarde, maintenance et problème le plus grave.
+- Fiche d'instance : résumé, contrôles de supervision, journal, chacun avec sa commande.
+- Actions : maintenance (bouton qui bascule selon l'état connu), collecte, sauvegarde. Une instance de production demande son nom, les autres une simple confirmation ; le pilote reçoit la réponse par `--confirm` et le journal enregistre `via: dashboard`.
+- Opérations : les actions s'exécutent en tâche de fond et se suivent dans la page Opérations.
+- Inventaire : affichage et validation.
+
+Sur un téléphone, les colonnes les moins utiles disparaissent et seule l'action de maintenance reste proposée. Le tableau de bord n'écoute que sur `127.0.0.1` : à distance, passez par un tunnel SSH (`ssh -L <port>:127.0.0.1:<port> <poste>`).
