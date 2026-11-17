@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace App\Command\Module;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
 
-class DefaultController extends CommandController
+class DefaultController extends Command
 {
     public function handle(): void
     {
-        $cmd = implode(" ",$this->getArgs());
+        $this->info('Dolibarr module management
 
-        $this->info("All of dolibarr cli for modules manipulation
 Usage:
- - $cmd list --help
- - $cmd activate --help
- - $cmd deactivate --help");
+  ./dolibarr module list [--active|--inactive]   - List installed modules
+  ./dolibarr module activate name=MODULE         - Activate a module
+  ./dolibarr module deactivate name=MODULE       - Deactivate a module
+
+Add --help to any command for its options.');
     }
 }

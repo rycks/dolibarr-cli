@@ -4,162 +4,125 @@ declare(strict_types=1);
 
 namespace App\Command\Module;
 
-use Minicli\Command\CommandController;
-use App\Util\DolibarrHelper;
+use App\Support\Command;
+use App\Util\ModuleScanner;
 
-class DeactivateController extends CommandController
+class DeactivateController extends Command
 {
+    /** Modules that are never deactivated by --all. */
+    private const PROTECTED_MODULES = ['modUser', 'modSysLog'];
+
     public function usage(): void
     {
-        $this->info("Deactivate a Dolibarr module
+        $this->info('Deactivate a Dolibarr module
 
 Usage:
-  ./dolibarr module deactivate name=MODULE_NAME
-  ./dolibarr module deactivate --all
+  ./dolibarr module deactivate name=MODULE
+  ./dolibarr module deactivate --all [--yes]
 
 Parameters:
-  name=MODULE_NAME - Name or constant of the module to deactivate
-                     (e.g., modFacture, modSociete, modUser)
+  name=MODULE - Module class or name (modFacture, Facture); modules that depend on it
+                are deactivated too
 
 Options:
-  --all  - Deactivate all active modules (except critical ones)
-  --help - Display this help message
-
-Examples:
-  ./dolibarr module deactivate name=modFacture
-  ./dolibarr module deactivate name=modSociete
-  ./dolibarr module deactivate --all");
+  --all  - Deactivate every active module except modUser and modSysLog
+  --yes  - With --all, do not ask for confirmation
+  --help - Display this help message');
     }
 
     public function handle(): void
     {
-        global $db, $conf, $user;
-
-        $this->info('Deactivate a Dolibarr module');
-
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        // Load required Dolibarr libraries
-        require_once DOL_DOCUMENT_ROOT . '/core/modules/DolibarrModules.class.php';
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/functions2.lib.php';
-
-        // Create a user object if not exists (required for unActivateModule)
-        if (!isset($user) || !is_object($user)) {
-            $user = DolibarrHelper::getFirstSuperAdminUser();
-            if (!$user) {
-                $this->error("No super admin user found! Cannot deactivate modules.");
-                $this->info("Please ensure at least one active super admin exists.");
-                return;
-            }
+        if ( ! $this->requireDolibarr() || null === $this->actingUser()) {
+            return;
         }
 
-        // Check if --all flag is set
         if ($this->hasFlag('all')) {
-            $this->deactivateAllModules();
+            $this->deactivateAll();
+
             return;
         }
 
-        // Check if module name is provided
-        if (!$this->hasParam('name')) {
-            $this->error("Module name is required!");
-            $this->info("Usage: ./dolibarr module deactivate name=MODULE_NAME");
-            $this->info("   or: ./dolibarr module deactivate --all");
-            $this->info("Use --help for more information");
+        $name = $this->param('name');
+        if (null === $name || '' === $name) {
+            $this->usage();
+            $this->fail('Give name=MODULE or --all.');
+
             return;
         }
 
-        $moduleName = $this->getParam('name');
+        $modName = ModuleScanner::resolve($name);
+        if (null === $modName) {
+            $this->fail("Module '{$name}' not found: see ./dolibarr module list.");
 
-        // Use Dolibarr's native unActivateModule function
-        $result = unActivateModule($moduleName);
-
-        if ($result > 0) {
-            $this->success("Module '$moduleName' successfully deactivated!");
-            $this->display("Module is now disabled in Dolibarr configuration.");
-        } elseif ($result == 0) {
-            $this->info("Module '$moduleName' may already be deactivated.");
-        } else {
-            $this->error("Failed to deactivate module '$moduleName'");
-            $this->info("Please check the module name and try again.");
-            $this->info("Use './dolibarr module list' to see available modules.");
+            return;
         }
+
+        if ( ! ModuleScanner::isActive(ModuleScanner::all()[$modName])) {
+            $this->info("Module '{$modName}' is already inactive.");
+
+            return;
+        }
+
+        $error = $this->deactivate($modName);
+        if ('' !== $error) {
+            $this->fail("Failed to deactivate '{$modName}': {$error}");
+
+            return;
+        }
+
+        $this->success("Module '{$modName}' deactivated.");
     }
 
-    private function deactivateAllModules(): void
+    private function deactivate(string $modName): string
     {
-        global $db, $conf;
+        // unActivateModule() returns '' on success, an error message otherwise.
+        return strip_tags((string) unActivateModule($modName));
+    }
 
-        $this->info("Deactivating all active modules...\n");
-        $this->error("WARNING: This will deactivate all modules except critical ones!");
-
-        $modulesdir = dolGetModulesDirs();
-        $deactivated = 0;
-        $failed = 0;
-        $skipped = 0;
-
-        // Critical modules that should never be deactivated
-        $criticalModules = ['modUser', 'modSysLog'];
-
-        foreach ($modulesdir as $dir) {
-            $handle = @opendir($dir);
-            if (is_resource($handle)) {
-                while (($file = readdir($handle)) !== false) {
-                    if (is_readable($dir . $file) && substr($file, 0, 3) == 'mod' && substr($file, -10) == '.class.php') {
-                        $modName = substr($file, 0, strlen($file) - 10);
-
-                        // Skip critical modules
-                        if (in_array($modName, $criticalModules)) {
-                            $this->info("! Protected: $modName (critical module, skipped)");
-                            $skipped++;
-                            continue;
-                        }
-
-                        include_once $dir . $file;
-                        if (class_exists($modName)) {
-                            $objMod = new $modName($db);
-
-                            // Check if module is currently active
-                            $const_name = 'MAIN_MODULE_' . strtoupper($modName);
-                            if (!isset($conf->global->$const_name) || empty($conf->global->$const_name)) {
-                                // Module not active, skip
-                                $skipped++;
-                                continue;
-                            }
-
-                            $result = unActivateModule($modName);
-
-                            if ($result > 0) {
-                                $this->display("Deactivated: " . $objMod->getName());
-                                $deactivated++;
-                            } elseif ($result == 0) {
-                                $this->info("- Already inactive: " . $objMod->getName());
-                                $skipped++;
-                            } else {
-                                $this->error("✗ Failed: " . $objMod->getName());
-                                $failed++;
-                            }
-                        }
-                    }
-                }
-                closedir($handle);
+    private function deactivateAll(): void
+    {
+        $active = [];
+        foreach (ModuleScanner::all() as $modName => $module) {
+            if (ModuleScanner::isActive($module) && ! in_array($modName, self::PROTECTED_MODULES, true)) {
+                $active[$modName] = $module;
             }
         }
 
-        $this->info("\n=== Summary ===");
-        $this->success("Deactivated: $deactivated modules");
-        if ($skipped > 0) {
-            $this->info("Skipped: $skipped modules (inactive, critical or protected)");
-        }
-        if ($failed > 0) {
-            $this->error("Failed: $failed modules");
-        }
-    }
+        if ([] === $active) {
+            $this->info('No active module to deactivate.');
 
-    public function required(): array
-    {
-        return [];
+            return;
+        }
+
+        $this->error('WARNING: '.count($active).' module(s) will be deactivated: '.implode(', ', array_keys($active)));
+        if ( ! $this->confirm('Deactivate them all?')) {
+            $this->info('Cancelled.');
+
+            return;
+        }
+
+        $done = 0;
+        $failed = 0;
+        foreach ($active as $modName => $module) {
+            $error = $this->deactivate($modName);
+            if ('' === $error) {
+                $this->display('Deactivated: '.$module->getName());
+                $done++;
+            } else {
+                $this->error('Failed: '.$module->getName()." ({$error})");
+                $failed++;
+            }
+        }
+
+        $this->info("\nDeactivated: {$done}, failed: {$failed}");
+        if ($failed > 0) {
+            $this->fail("{$failed} module(s) could not be deactivated.");
+        }
     }
 }

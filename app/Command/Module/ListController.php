@@ -4,69 +4,62 @@ declare(strict_types=1);
 
 namespace App\Command\Module;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
+use App\Util\ModuleScanner;
 
-class ListController extends CommandController
+class ListController extends Command
 {
-
     public function usage(): void
     {
-        $this->info("");
+        $this->info('List installed Dolibarr modules
+
+Usage:
+  ./dolibarr module list [--active] [--inactive]
+
+Options:
+  --active     Only active modules
+  --inactive   Only inactive modules
+
+Columns: class, number, name, version, active, external, hidden, publisher.');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-        $force = false;
-        $this->info('Get list of installed modules');
+        if ($this->hasFlag('help')) {
+            $this->usage();
 
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/functions2.lib.php';
+            return;
+        }
 
-        $content = [];
-        $content[] = ['id', 'name', 'level', 'external', 'hidden', 'update', 'editor'];
-        $modulesdir = dolGetModulesDirs();
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
 
-        foreach ($modulesdir as $dir) {
-            // Load modules attributes in arrays (name, numero, orders) from dir directory
-            //print $dir."\n<br>";
-            $handle = @opendir($dir);
-            if (is_resource($handle)) {
-                while (($file = readdir($handle)) !== false) {
-                    if (is_readable($dir . $file) && substr($file, 0, 3) == 'mod' && substr($file, dol_strlen($file) - 10) == '.class.php') {
-                        require_once DOL_DOCUMENT_ROOT . '/core/lib/functions2.lib.php';
-                        $modName = substr($file, 0, dol_strlen($file) - 10);
+        $modules = ModuleScanner::all();
+        if ([] === $modules) {
+            $this->fail('No module found in the module directories.');
 
-                        include_once $dir . $file; // A class already exists in a different file will send a non catchable fatal error.
-                        if (class_exists($modName)) {
-                            $objMod = new $modName($db);
+            return;
+        }
 
-                            $id = $objMod->numero;
-                            $name = $objMod->getName();
-                            $publisher = dol_escape_htmltag($objMod->getPublisher());
-                            $external = ($objMod->isCoreOrExternalModule() == 'external' ? 'yes' : 'no');
-                            $hidden = ($objMod->hidden == 'true' ? 'yes' : 'no');
-                            $update = ($objMod->needUpdate == 'true' ? 'yes' : 'no');
-
-                            $content[] = [
-                                strval($id),
-                                $name,
-                                $objMod->version,
-                                $external,
-                                $hidden,
-                                $update,
-                                $publisher,
-                            ];
-                        }
-                    }
-                }
-                closedir($handle);
+        $content = [['class', 'number', 'name', 'version', 'active', 'external', 'hidden', 'publisher']];
+        foreach ($modules as $modName => $module) {
+            $active = ModuleScanner::isActive($module);
+            if (($this->hasFlag('active') && ! $active) || ($this->hasFlag('inactive') && $active)) {
+                continue;
             }
+            $content[] = [
+                $modName,
+                (string) $module->numero,
+                (string) $module->getName(),
+                (string) $module->getVersion(1),
+                $active ? 'yes' : 'no',
+                'external' === $module->isCoreOrExternalModule() ? 'yes' : 'no',
+                ! empty($module->hidden) ? 'yes' : 'no',
+                html_entity_decode(strip_tags((string) $module->getPublisher()), ENT_QUOTES),
+            ];
         }
 
-        if (!empty($modName)) {
-            $this->printTable($content);
-        } else {
-            $this->error("Can't fetch modules list!");
-        }
+        $this->printTable($content);
     }
 }
