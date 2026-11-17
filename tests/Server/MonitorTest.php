@@ -292,3 +292,13 @@ it('knows the PHP range of every Dolibarr version', function (): void {
         ->and(Matrix::check('6.0.8', '7.0.33'))->toBe(Matrix::UNKNOWN)
         ->and(Matrix::range('12.0.0')['max_source'])->toContain('ChangeLog 11.0.0');
 });
+
+it('ships a Zabbix template that covers every check', function (): void {
+    $yaml = (string) file_get_contents(DOLICLI_ROOT.'/contrib/zabbix/dolicli_template.yaml');
+
+    foreach (array_merge(Dolicli\Monitor\Collector::fastChecks(), Dolicli\Monitor\Collector::slowChecks()) as $check) {
+        expect($yaml)->toContain("dolicli.check.status[{#INSTANCE},{$check}]");
+    }
+    expect($yaml)->toContain("key: 'vfs.file.contents[{#STATEFILE}]'")
+        ->and($yaml)->toContain('key: dolicli.discover');
+});

@@ -65,7 +65,7 @@ final class Collector
     public function collect(string $frequency, bool $database, bool $operation, string $loadError = ''): array
     {
         $checks = [];
-        $names = self::FAST === $frequency ? $this->fastChecks() : $this->slowChecks();
+        $names = self::FAST === $frequency ? self::fastChecks() : self::slowChecks();
         foreach ($names as $name) {
             if (in_array($name, self::DATABASE_CHECKS, true) && (!$database || $operation)) {
                 $reason = $operation ? 'Not measured: an operation is running on the instance' : 'Database unreachable';
@@ -86,7 +86,7 @@ final class Collector
     /**
      * @return array<int, string>
      */
-    public function fastChecks(): array
+    public static function fastChecks(): array
     {
         return [
             'database.reachable', 'dolibarr.version', 'dolibarr.db_version', 'dolibarr.upgrade_pending', 'php.cli_version',
@@ -98,7 +98,7 @@ final class Collector
     /**
      * @return array<int, string>
      */
-    public function slowChecks(): array
+    public static function slowChecks(): array
     {
         return [
             'users.active', 'backup.age', 'storage.documents_bytes', 'storage.database_bytes', 'filecheck.modified',
