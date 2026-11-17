@@ -24,6 +24,12 @@ final class Discovery
     /** @var bool */
     private $truncated = false;
 
+    /** @var array<int, string> Directories that could not be listed */
+    private $unreadable = [];
+
+    /** Layouts probed inside a directory that can be crossed but not listed (mode 711...). */
+    const PROBED = ['htdocs', 'dolibarr/htdocs'];
+
     public function __construct(int $maxDepth = 6, int $seconds = 30)
     {
         $this->maxDepth = $maxDepth;
@@ -33,6 +39,14 @@ final class Discovery
     public function truncated(): bool
     {
         return $this->truncated;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function unreadable(): array
+    {
+        return $this->unreadable;
     }
 
     /**
@@ -66,6 +80,17 @@ final class Discovery
         }
         $entries = @scandir($dir);
         if (!is_array($entries)) {
+            // Often crossable without being listable (hosting directories in mode 711):
+            // the usual layouts of the Dolibarr archive are still probed.
+            $this->unreadable[] = $dir;
+            Log::warning("discovery: cannot list {$dir}");
+            foreach (self::PROBED as $layout) {
+                $candidate = $dir . '/' . $layout;
+                if (is_file($candidate . '/master.inc.php') && is_file($candidate . '/filefunc.inc.php')) {
+                    $found[] = self::describe($candidate);
+                }
+            }
+
             return;
         }
         foreach ($entries as $entry) {

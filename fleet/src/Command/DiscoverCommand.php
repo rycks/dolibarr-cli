@@ -34,6 +34,9 @@ final class DiscoverCommand extends FleetCommand
 
             return self::EXIT_OK;
         }
+        foreach ($outcome['warnings'] as $warning) {
+            $this->error($warning);
+        }
         foreach ($outcome['instances'] as $instance) {
             $this->output->writeln(sprintf(
                 '%-24s %-10s %s  documents=%s  run_as=%s',
@@ -49,15 +52,20 @@ final class DiscoverCommand extends FleetCommand
     }
 
     /**
-     * @return array{ok: bool, reached: bool, error: string, instances: list<array<string, mixed>>}
+     * @return array{ok: bool, reached: bool, error: string, instances: list<array<string, mixed>>, warnings: list<string>}
      */
     public function discover(string $server, string $root, string $php, bool $sudo): array
     {
         $outcome = $this->dolicli()->runOnServer($server, $php, ['instance', 'discover', 'root='.$root], $sudo);
         if ( ! $outcome->ok()) {
-            return ['ok' => false, 'reached' => $outcome->reached, 'error' => $outcome->error, 'instances' => []];
+            return ['ok' => false, 'reached' => $outcome->reached, 'error' => $outcome->error, 'instances' => [], 'warnings' => []];
         }
 
-        return ['ok' => true, 'reached' => true, 'error' => '', 'instances' => array_values((array) ($outcome->data()['instances'] ?? []))];
+        $warnings = [];
+        foreach ((array) ($outcome->envelope['warnings'] ?? []) as $warning) {
+            $warnings[] = (string) ($warning['message'] ?? '');
+        }
+
+        return ['ok' => true, 'reached' => true, 'error' => '', 'instances' => array_values((array) ($outcome->data()['instances'] ?? [])), 'warnings' => $warnings];
     }
 }

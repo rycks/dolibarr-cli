@@ -65,7 +65,7 @@ servers:
 
 | Commande | Rôle |
 |----------|------|
-| `dolifleet add <serveur>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire |
+| `dolifleet add <serveur> --root=<htdocs>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire |
 | `dolifleet config validate` | Valide l'inventaire et ses inclusions |
 | `dolifleet discover <serveur>` | Liste les instances trouvées sur un serveur, sans modifier l'inventaire |
 | `dolifleet check <cible>` | Teste SSH, sudo, PHP, la lecture de Dolibarr, le mode installé, l'accès root, l'écart avec `instances.ini` |
@@ -81,6 +81,8 @@ servers:
 | `dolifleet serve` | Tableau de bord web local |
 
 `--json` donne une sortie exploitable par un script. Codes de retour : 0 si tout a réussi, 1 si au moins une instance a échoué, 2 en cas d'usage invalide (inventaire, cible vide, confirmation absente), 3 si aucune instance n'a été jointe.
+
+La découverte ne voit que les dossiers que le compte SSH peut lister : les dossiers d'hébergement sont souvent traversables sans être listables (mode 711). Dans ce cas, elle teste `htdocs/` et `dolibarr/htdocs/` à l'intérieur et nomme les dossiers qu'elle n'a pas pu lister ; si une instance manque encore, donnez à `--root` le dossier d'installation ou son `htdocs`, ou cherchez en root avec `--sudo`.
 
 ## Garde-fous
 

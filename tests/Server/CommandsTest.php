@@ -315,3 +315,23 @@ it('discovers the Dolibarr installations without returning credentials', functio
         ->and($found['database_type'])->toBe('sqlite3')
         ->and(json_encode($result['json']))->not->toContain('dolibarr_main_db_pass');
 });
+
+it('names the directories it cannot list and probes the usual layouts inside them', function (): void {
+    $base = DOLICLI_TEST_TMP.'/hosting-'.bin2hex(random_bytes(4));
+    $site = $base.'/srv/webs/dolibarr.example.com';
+    mkdir($site.'/dolibarr/htdocs', 0755, true);
+    touch($site.'/dolibarr/htdocs/master.inc.php');
+    copy(DOLICLI_DOLPATH.'/filefunc.inc.php', $site.'/dolibarr/htdocs/filefunc.inc.php');
+    chmod($site, 0311);
+
+    try {
+        $result = serverJson(['instance', 'discover', 'root='.$base.'/srv/webs']);
+    } finally {
+        chmod($site, 0755);
+    }
+
+    expect($result['code'])->toBe(0)
+        ->and($result['json']['data']['instances'][0]['htdocs'])->toBe($site.'/dolibarr/htdocs')
+        ->and($result['json']['warnings'][0]['code'])->toBe('DISCOVERY_UNREADABLE')
+        ->and($result['json']['warnings'][0]['message'])->toContain($site);
+});

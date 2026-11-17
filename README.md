@@ -63,10 +63,11 @@ Host dolibarr-example
 ```
 
 `dolifleet add` checks the host key (fingerprint shown, confirmation asked), searches the
-Dolibarr installations under `--root` (`/var/www` by default), then asks which ones to add:
+Dolibarr installations under `--root` (`/var/www` by default), then asks which ones to add.
+Give `--root` the `htdocs` of the instance:
 
 ```
-$ dolifleet add dolibarr-example --root=/srv/webs --php=/usr/bin/php8.2 --sudo
+$ dolifleet add dolibarr-example --root=/srv/webs/dolibarr.example.com/dolibarr/htdocs --php=/usr/bin/php8.2 --sudo
 Host key of dolibarr-example:
 256 SHA256:3fQ0...Xk2w dolibarr.example.com (ED25519)
 Is this the key of dolibarr-example? Type yes to add it to known_hosts: yes
@@ -75,6 +76,11 @@ Instances to add, comma separated [dolibarr]:
 Added 1 instance(s) of dolibarr-example to ~/.config/dolifleet/inventory.yaml. Next: dolifleet check server:dolibarr-example
 ```
 
+- A wider `--root` (`/srv/webs`) finds every instance of the server, but only in the directories
+  the account can list: hosting directories are often crossable without being listable (mode
+  711). The search then probes `htdocs/` and `dolibarr/htdocs/` inside them, and names the
+  directories it could not list; give `--root` the installation directory or its `htdocs` when
+  an instance is still missing.
 - `--sudo` searches as root (`sudo -n`): `debian` usually cannot read `conf.php`, owned by the
   web account. The search reads `conf.php` without executing it and never returns credentials.
 - `run_as` is the owner of `documents/`: dolifleet will run `sudo -n -u www-data /usr/bin/php8.2`

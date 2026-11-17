@@ -54,12 +54,16 @@ final class AddCommand extends FleetCommand
 
             return self::EXIT_FAILED;
         }
+        foreach ($discovery['warnings'] as $warning) {
+            $this->output->writeln('<comment>'.self::clean($warning).'</comment>');
+        }
         $instances = [];
         foreach ($discovery['instances'] as $instance) {
             $instances[(string) $instance['id']] = $instance;
         }
         if ([] === $instances) {
-            $this->error('No Dolibarr instance found under '.$this->input->getOption('root').' on '.$server.'.');
+            $this->error('No Dolibarr instance found under '.$this->input->getOption('root').' on '.$server
+                .': give --root the installation directory or its htdocs, or search as root with --sudo.');
 
             return self::EXIT_FAILED;
         }
@@ -102,16 +106,21 @@ final class AddCommand extends FleetCommand
     }
 
     /**
-     * @return array{ok: bool, reached: bool, error: string, instances: list<array<string, mixed>>}
+     * @return array{ok: bool, reached: bool, error: string, instances: list<array<string, mixed>>, warnings: list<string>}
      */
     private function discoverWith(string $server, string $php): array
     {
         $outcome = $this->dolicliForServer()->runOnServer($server, $php, ['instance', 'discover', 'root='.(string) $this->input->getOption('root')], (bool) $this->input->getOption('sudo'));
         if ( ! $outcome->ok()) {
-            return ['ok' => false, 'reached' => $outcome->reached, 'error' => $outcome->error, 'instances' => []];
+            return ['ok' => false, 'reached' => $outcome->reached, 'error' => $outcome->error, 'instances' => [], 'warnings' => []];
         }
 
-        return ['ok' => true, 'reached' => true, 'error' => '', 'instances' => array_values((array) ($outcome->data()['instances'] ?? []))];
+        $warnings = [];
+        foreach ((array) ($outcome->envelope['warnings'] ?? []) as $warning) {
+            $warnings[] = (string) ($warning['message'] ?? '');
+        }
+
+        return ['ok' => true, 'reached' => true, 'error' => '', 'instances' => array_values((array) ($outcome->data()['instances'] ?? [])), 'warnings' => $warnings];
     }
 
     private function dolicliForServer(): \Dolifleet\Remote\Dolicli

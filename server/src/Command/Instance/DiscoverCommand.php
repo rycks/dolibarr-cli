@@ -55,6 +55,14 @@ final class DiscoverCommand extends Command
         }
         $discovery = new Discovery((int) ($ctx->value('depth') ?: 6), (int) ($ctx->value('timeout') ?: 30));
         $instances = $discovery->scan($root);
+        $unreadable = $discovery->unreadable();
+        if ([] !== $unreadable) {
+            $ctx->warn(
+                'DISCOVERY_UNREADABLE',
+                count($unreadable) . ' directories could not be listed by this account (' . implode(', ', array_slice($unreadable, 0, 5))
+                . (count($unreadable) > 5 ? ', ...' : '') . '): search as root, or give root= the installation directory or its htdocs.'
+            );
+        }
         if ($discovery->truncated()) {
             $ctx->warn('DISCOVERY_TRUNCATED', 'The search stopped at its time limit: some instances may be missing (timeout=SECONDS).');
         }
