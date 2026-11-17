@@ -7,10 +7,10 @@ namespace Dolifleet\Command;
 use Dolifleet\Inventory\Inventory;
 use Dolifleet\Inventory\InventoryException;
 use Dolifleet\Paths;
+use Dolifleet\Remote\HostKey;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Process\Process;
 use RuntimeException;
 
 /**
@@ -136,30 +136,25 @@ final class AddCommand extends FleetCommand
      */
     private function hostKey(string $server): bool
     {
-        $probe = $this->transport()->run($server, ['true'], '', 30);
-        if (0 === $probe->exitCode) {
+        $hostKey = new HostKey($this->transport());
+        $probe = $hostKey->probe($server);
+        if (HostKey::KNOWN === $probe['state']) {
             return true;
         }
-        if ( ! str_contains($probe->stderr, 'Host key verification failed')) {
-            $this->error('Cannot connect to '.$server.': '.trim($probe->stderr));
+        if (HostKey::UNREACHABLE === $probe['state']) {
+            $this->error($probe['error']);
 
             return false;
         }
-        $config = new Process(['ssh', '-G', $server]);
-        $config->run();
-        preg_match('/^hostname (\S+)$/m', $config->getOutput(), $host);
-        preg_match('/^port (\d+)$/m', $config->getOutput(), $port);
-        $scan = new Process(['ssh-keyscan', '-p', $port[1] ?? '22', $host[1] ?? $server], null, null, null, 30);
-        $scan->run();
-        $keys = trim($scan->getOutput());
-        if ('' === $keys) {
-            $this->error('Cannot read the host key of '.$server.': '.trim($scan->getErrorOutput()));
+        try {
+            $keys = $hostKey->scan($server);
+            $fingerprints = $hostKey->fingerprints($keys);
+        } catch (RuntimeException $e) {
+            $this->error($e->getMessage());
 
             return false;
         }
-        $fingerprint = new Process(['ssh-keygen', '-lf', '-'], null, null, $keys."\n", 30);
-        $fingerprint->run();
-        $this->output->writeln("Host key of {$server}:\n".self::clean($fingerprint->getOutput()));
+        $this->output->writeln("Host key of {$server}:\n".self::clean(implode("\n", $fingerprints)));
         if ( ! $this->input->getOption('accept-host-key')) {
             $answer = $this->ask('Is this the key of '.$server.'? Type yes to add it to known_hosts: ');
             if ('yes' !== trim((string) $answer)) {
@@ -168,11 +163,7 @@ final class AddCommand extends FleetCommand
                 return false;
             }
         }
-        $knownHosts = Paths::home().'/.ssh/known_hosts';
-        Paths::ensure(dirname($knownHosts));
-        if (false === file_put_contents($knownHosts, $keys."\n", FILE_APPEND | LOCK_EX)) {
-            throw new RuntimeException("Cannot write {$knownHosts}");
-        }
+        $hostKey->accept($keys);
 
         return true;
     }

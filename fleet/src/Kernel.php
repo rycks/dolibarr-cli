@@ -10,6 +10,7 @@ use Dolifleet\Command\CheckCommand;
 use Dolifleet\Command\ConfigCommand;
 use Dolifleet\Command\DiscoverCommand;
 use Dolifleet\Command\ExecCommand;
+use Dolifleet\Command\HostKeyCommand;
 use Dolifleet\Command\JobsCommand;
 use Dolifleet\Command\LogCommand;
 use Dolifleet\Command\MaintenanceCommand;
@@ -37,6 +38,7 @@ final class Kernel
             new ExecCommand(),
             new LogCommand(),
             new AddCommand(),
+            new HostKeyCommand(),
             new SetupCommand(),
             new MaintenanceCommand(),
             new BackupCommand(),

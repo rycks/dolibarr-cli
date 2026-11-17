@@ -94,6 +94,9 @@ Added 1 instance(s) of dolibarr-example to ~/.config/dolifleet/inventory.yaml. N
   The second line is only needed by `--sudo` and `dolifleet setup` (installed mode). A rule on a
   PHP binary amounts to a shell under that account: see the user documentation.
 - In a script: `--instances=dolibarr` instead of the question, `--accept-host-key` for a new server.
+- `dolifleet hostkey dolibarr-example [--accept] [--json]` does the host key step alone, without
+  any question: known or not, fingerprints of an unknown key, added to `~/.ssh/known_hosts` with
+  `--accept`. A changed key is never added: check it, then remove the old one with `ssh-keygen -R`.
 
 The server block is appended to the inventory, comments kept:
 

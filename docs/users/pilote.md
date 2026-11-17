@@ -11,7 +11,7 @@ description: "Administrer un parc de Dolibarr depuis un poste : inventaire, cibl
 ## Transport
 
 - Le binaire `ssh` du système : `~/.ssh/config`, ssh-agent, ProxyJump et multiplexage sont repris tels quels. Un serveur est un alias de `~/.ssh/config`.
-- `BatchMode=yes` : jamais de question bloquante. Une clé d'hôte inconnue fait échouer la connexion ; `dolifleet add` affiche son empreinte et demande confirmation avant de l'ajouter.
+- `BatchMode=yes` : jamais de question bloquante. Une clé d'hôte inconnue fait échouer la connexion ; `dolifleet add` affiche son empreinte et demande confirmation avant de l'ajouter. `dolifleet hostkey <serveur>` fait la même vérification sans poser de question : il indique si la clé est connue, donne les empreintes d'une clé inconnue et l'ajoute à `~/.ssh/known_hosts` avec `--accept`. Une clé qui a changé n'est jamais ajoutée : vérifiez-la auprès de l'administrateur du serveur, puis retirez l'ancienne avec `ssh-keygen -R <hôte>`.
 - Les commandes passent par `sudo -n -u <run_as>` (sans sudo quand le compte SSH est déjà `run_as`) : voir les règles sudo dans [Installation](/dolicli/installation).
 - Les arguments de Dolicli, secrets compris, voyagent dans le flux envoyé à PHP, jamais sur une ligne de commande.
 
@@ -66,6 +66,7 @@ servers:
 | Commande | Rôle |
 |----------|------|
 | `dolifleet add <serveur> --root=<htdocs>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire |
+| `dolifleet hostkey <serveur> [--accept]` | Clé d'hôte SSH : connue ou non, empreintes, ajout à `known_hosts` ; code 3 si le serveur ne répond pas |
 | `dolifleet config validate` | Valide l'inventaire et ses inclusions |
 | `dolifleet discover <serveur>` | Liste les instances trouvées sur un serveur, sans modifier l'inventaire |
 | `dolifleet check <cible>` | Teste SSH, sudo, PHP, la lecture de Dolibarr, le mode installé, l'accès root, l'écart avec `instances.ini` |

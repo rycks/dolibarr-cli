@@ -7,6 +7,7 @@ use Dolifleet\Inventory\InventoryException;
 use Dolifleet\Inventory\Targets;
 use Dolifleet\Remote\Body;
 use Dolifleet\Remote\Dolicli;
+use Dolifleet\Remote\HostKey;
 use Dolifleet\Remote\Result;
 use Dolifleet\Remote\Transport;
 
@@ -311,4 +312,76 @@ it('pauses an upgrade at a manual step without a terminal, and resumes it once t
         ->and($paused['json']['plan']['progress'][$manual]['state'])->toBe('paused')
         ->and($resumed['json']['plan']['progress'][$manual]['state'])->toBe('done')
         ->and($resumed['json']['plan']['progress']['backup']['state'])->toBe('done');
+});
+
+it('reports a known host key, and an unreachable server with its reason', function (): void {
+    $known = fleetJson(['hostkey', 'local-a']);
+    $text = fleet(['hostkey', 'local-a']);
+    $unreachable = fleetJson(['hostkey', 'unreachable']);
+    $unreachableText = fleet(['hostkey', 'unreachable']);
+
+    expect($known['code'])->toBe(0)
+        ->and($known['json'])->toBe(['server' => 'local-a', 'known' => true, 'fingerprints' => [], 'accepted' => false, 'error' => ''])
+        ->and($text['out'])->toContain('the connection to local-a works')
+        ->and($unreachable['code'])->toBe(3)
+        ->and($unreachable['json']['known'])->toBeFalse()
+        ->and($unreachable['json']['accepted'])->toBeFalse()
+        ->and($unreachable['json']['error'])->toContain('Cannot connect to unreachable: ssh: connect to host unreachable port 22: Connection refused')
+        ->and($unreachableText['code'])->toBe(3)
+        ->and($unreachableText['err'])->toContain('Connection refused')
+        ->and(fleet(['hostkey', '-oProxyCommand=x'])['code'])->not->toBe(0)
+        ->and(fleet(['hostkey', 'bad;alias'])['code'])->toBe(2);
+});
+
+it('tells an unknown host key from a changed one, fingerprints scanned keys and appends them to known_hosts', function (): void {
+    $transport = new class () implements Transport {
+        public string $stderr = '';
+
+        public function run(string $server, array $command, string $stdin = '', int $timeout = 600): Result
+        {
+            return new Result(255, '', $this->stderr);
+        }
+
+        public function runMany(array $jobs, int $parallel, int $timeout = 600): array
+        {
+            return [];
+        }
+
+        public function remoteUser(string $server): string
+        {
+            return '';
+        }
+    };
+    $hostKey = new HostKey($transport);
+    $transport->stderr = "No ED25519 host key is known for web-a and you have requested strict checking.\r\nHost key verification failed.\r\n";
+    $unknown = $hostKey->probe('web-a');
+    $transport->stderr = "@@@@@@@@@@@\r\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\nHost key verification failed.\r\n";
+    $changed = $hostKey->probe('web-a');
+
+    $dir = DOLICLI_TEST_TMP.'/fleet/hostkey';
+    if ( ! is_dir($dir)) {
+        mkdir($dir, 0700, true);
+    }
+    array_map('unlink', glob($dir.'/key*') ?: []);
+    exec('ssh-keygen -q -t ed25519 -N "" -C "" -f '.escapeshellarg($dir.'/key'));
+    $keys = 'web-a.example.com '.trim((string) file_get_contents($dir.'/key.pub'));
+    $home = getenv('HOME');
+    putenv('HOME='.$dir);
+    try {
+        if (is_file($dir.'/.ssh/known_hosts')) {
+            unlink($dir.'/.ssh/known_hosts');
+        }
+        $file = $hostKey->accept($keys);
+    } finally {
+        putenv(false === $home ? 'HOME' : 'HOME='.$home);
+    }
+
+    expect($unknown)->toBe(['state' => HostKey::UNKNOWN, 'error' => ''])
+        ->and($changed['state'])->toBe(HostKey::UNREACHABLE)
+        ->and($changed['error'])->toContain('has changed')
+        ->and($hostKey->fingerprints($keys))->toHaveCount(1)
+        ->and($hostKey->fingerprints($keys)[0])->toMatch('/^256 SHA256:\S+ web-a\.example\.com \(ED25519\)$/')
+        ->and($file)->toBe($dir.'/.ssh/known_hosts')
+        ->and(file_get_contents($file))->toBe($keys."\n")
+        ->and(fn () => $hostKey->fingerprints('not a key'))->toThrow(RuntimeException::class, 'Cannot compute the fingerprint');
 });
