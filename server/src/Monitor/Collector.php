@@ -6,6 +6,7 @@ use Dolicli\Dolibarr\CronJobs;
 use Dolicli\Dolibarr\Dolibarr;
 use Dolicli\Dolibarr\Maintenance;
 use Dolicli\Dolibarr\Modules;
+use Dolicli\Instance\BackupFiles;
 use Dolicli\Instance\Instance;
 use Dolicli\Instance\PhpFileReader;
 use Dolicli\Php\Matrix;
@@ -378,25 +379,10 @@ final class Collector
      */
     private function backupAge(string $frequency): array
     {
-        $dirs = [$this->dataRoot . '/admin/backup'];
-        if ('' !== $this->instance->setting('backup_dir')) {
-            $dirs[] = $this->instance->setting('backup_dir');
-        }
-        $pattern = $this->instance->setting('backup_pattern', '*');
-        $latest = 0;
-        $latestFile = '';
-        foreach ($dirs as $dir) {
-            $files = glob(rtrim($dir, '/') . '/' . $pattern);
-            foreach (is_array($files) ? $files : [] as $file) {
-                $mtime = (int) @filemtime($file);
-                if ($mtime > $latest) {
-                    $latest = $mtime;
-                    $latestFile = $file;
-                }
-            }
-        }
+        $backups = new BackupFiles($this->instance, $this->dataRoot);
+        list($latestFile, $latest) = $backups->latest();
         if (0 === $latest) {
-            return State::check('critical', null, 'No backup found in ' . implode(', ', $dirs) . ' (pattern ' . $pattern . ')', $frequency, ['critical' => 0]);
+            return State::check('critical', null, 'No backup found in ' . implode(', ', $backups->dirs()) . ' (pattern ' . $backups->pattern() . ')', $frequency, ['critical' => 0]);
         }
         $age = max(0, time() - $latest);
 

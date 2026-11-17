@@ -48,7 +48,7 @@ type: "module-dolibarr"
 | Module | `module list\|activate\|deactivate` | Gérer les modules |
 | Réparation | `repair run` | Exécuter une action de réparation |
 | Tiers | `thirdparty list\|accountingnumber` | Lister les tiers, recalculer les codes comptables |
-| Sauvegarde | `backup` | Exporter la base, les documents ou les modules |
+| Sauvegarde | `backup`, `backup list` | Exporter la base, les documents ou les modules ; lister les sauvegardes |
 | Anonymisation | `anonymize run` | Anonymiser une copie de la base |
 | Montée de version | `upgrade status\|deploy\|switch-files\|migrate\|finalize\|restore-files` | Étapes unitaires |
 | Supervision | `monitor collect\|show\|discover` | Collecter, restituer, découvrir |

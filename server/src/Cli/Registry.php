@@ -68,6 +68,7 @@ final class Registry
             \Dolicli\Command\System\FilecheckCommand::class,
             \Dolicli\Command\Cron\ListCommand::class,
             \Dolicli\Command\BackupCommand::class,
+            \Dolicli\Command\Backup\ListCommand::class,
             \Dolicli\Command\Repair\RunCommand::class,
             \Dolicli\Command\Anonymize\RunCommand::class,
             \Dolicli\Command\System\PhpCommand::class,

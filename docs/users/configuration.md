@@ -58,7 +58,7 @@ monitor_group = zabbix
 | `web_php` | Version de PHP du serveur web, déclarée par l'administrateur (`7.4`) : Dolicli ne peut pas la mesurer |
 | `dolibarr_user` | Utilisateur Dolibarr au nom duquel les actions sont faites |
 | `maintenance_login` | Login autorisé pendant le mode maintenance |
-| `backup_dir`, `backup_pattern` | Sauvegardes faites hors de Dolicli, pour le contrôle de l'âge de la sauvegarde |
+| `backup_dir`, `backup_pattern` | Sauvegardes faites hors de Dolicli, pour le contrôle de l'âge de la sauvegarde et `backup list` (le motif s'applique aussi à `documents/admin/backup/`) |
 | `prom_dir` | Dossier du textfile collector de node_exporter |
 | `monitor_group` | Groupe du compte de supervision (lecture des fichiers d'état) |
 
