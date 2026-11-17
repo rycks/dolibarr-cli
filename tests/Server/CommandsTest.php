@@ -293,3 +293,25 @@ it('reports a missing Dolibarr with exit code 3', function (): void {
         ->and($default['code'])->toBe(3)
         ->and($default['json']['errors'][0]['message'])->toContain('./htdocs');
 });
+
+it('lists the PHP binaries with their compatibility with the instance', function (): void {
+    $result = serverJson(['system', 'php']);
+    $binaries = array_column($result['json']['data']['binaries'], null, 'version');
+
+    expect($result['code'])->toBe(0)
+        ->and($result['json']['data']['dolibarr_version'])->toBe('18.0.10')
+        ->and($result['json']['data']['range']['max'])->toBe('8.1')
+        ->and($binaries[PHP_VERSION]['extensions'])->toContain('json');
+});
+
+it('discovers the Dolibarr installations without returning credentials', function (): void {
+    $result = serverJson(['instance', 'discover', 'root='.dirname(DOLICLI_DOLPATH, 2)]);
+    $found = $result['json']['data']['instances'][0];
+
+    expect($result['code'])->toBe(0)
+        ->and($found['htdocs'])->toBe(DOLICLI_DOLPATH)
+        ->and($found['version'])->toBe('18.0.10')
+        ->and($found['documents'])->toBe(realpath(DOLICLI_TEST_DOCUMENTS))
+        ->and($found['database_type'])->toBe('sqlite3')
+        ->and(json_encode($result['json']))->not->toContain('dolibarr_main_db_pass');
+});

@@ -355,6 +355,15 @@ final class Application
         }
         $warnings = null === $this->ctx ? [] : $this->ctx->warnings();
 
+        if (null === $failure && [] === $errors && null !== $this->command && in_array($this->format, ['text', 'json'], true)) {
+            $raw = $this->command->rawResult($data);
+            if (null !== $raw) {
+                $this->console->out($raw);
+
+                return;
+            }
+        }
+
         if ('json' === $this->format) {
             $instance = null;
             if (null !== $this->ctx && null !== $this->ctx->instanceIfResolved()) {

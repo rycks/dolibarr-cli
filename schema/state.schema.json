@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rycks/dolibarr-cli/schema/state.schema.json",
+  "title": "dolicli state file",
+  "description": "Result of the monitoring checks of an instance: /var/lib/dolicli/<run_as>/<instance>.json, dolicli monitor collect --stdout, dolicli monitor show --format=json. Units: bytes, seconds, ISO 8601 dates with time zone. Version 1.x: adding a field or a check is a minor change; renaming, removing or changing the unit of a field is a major change, preceded by a period where both fields exist.",
+  "type": "object",
+  "required": ["schema_version", "dolicli_version", "generated_at", "generated_at_unix", "instance", "status", "checks"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "dolicli_version": { "type": "string" },
+    "generated_at": { "description": "Date of the last write.", "type": "string", "format": "date-time" },
+    "generated_at_unix": { "description": "Same date, Unix time in seconds.", "type": "integer", "minimum": 0 },
+    "instance": {
+      "type": "object",
+      "required": ["id", "htdocs", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+        "htdocs": { "type": "string" },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "status": {
+      "description": "Most serious status of the checks, skipped ones excluded: critical > unknown > warning > ok.",
+      "$ref": "#/$defs/globalStatus"
+    },
+    "checks": {
+      "description": "Checks indexed by identifier ($.checks[\"sessions.count\"].value). Always an object.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$" },
+      "additionalProperties": { "$ref": "#/$defs/check" },
+      "properties": {
+        "collector.age": { "$ref": "#/$defs/integerCheck", "description": "Seconds since generated_at_unix. Computed at read time, never stored." },
+        "database.reachable": { "$ref": "#/$defs/booleanCheck" },
+        "dolibarr.version": { "$ref": "#/$defs/stringCheck", "description": "Version of the files." },
+        "dolibarr.db_version": { "$ref": "#/$defs/stringCheck", "description": "MAIN_VERSION_LAST_UPGRADE, else MAIN_VERSION_LAST_INSTALL." },
+        "dolibarr.upgrade_pending": { "$ref": "#/$defs/booleanCheck", "description": "Files newer than the database (rule of main.inc.php). A database newer than the files is critical with value false." },
+        "php.cli_version": { "$ref": "#/$defs/stringCheck" },
+        "php.web_version": { "$ref": "#/$defs/stringCheck", "description": "web_php declared in instances.ini; skipped when absent." },
+        "php.compatibility": { "$ref": "#/$defs/stringCheck", "description": "ok, warning, incompatible or unknown, for web_php and the version of Dolibarr." },
+        "maintenance.enabled": { "$ref": "#/$defs/booleanCheck" },
+        "sessions.count": { "$ref": "#/$defs/integerCheck", "description": "Estimated number of active sessions (session files of the PHP CLI)." },
+        "users.active": { "$ref": "#/$defs/integerCheck" },
+        "cron.failed": { "$ref": "#/$defs/integerCheck" },
+        "cron.stale": { "$ref": "#/$defs/integerCheck" },
+        "cron.stuck": { "$ref": "#/$defs/integerCheck" },
+        "backup.age": { "$ref": "#/$defs/integerCheck", "description": "Seconds since the most recent backup; null with critical when none is found." },
+        "storage.free_bytes": { "$ref": "#/$defs/integerCheck", "description": "Bytes free on the fullest partition of documents/ and htdocs." },
+        "storage.documents_bytes": { "$ref": "#/$defs/integerCheck" },
+        "storage.database_bytes": { "$ref": "#/$defs/integerCheck" },
+        "filecheck.modified": { "$ref": "#/$defs/integerCheck" },
+        "filecheck.missing": { "$ref": "#/$defs/integerCheck" },
+        "filecheck.added": { "$ref": "#/$defs/integerCheck" },
+        "modules.external": {
+          "$ref": "#/$defs/check",
+          "properties": {
+            "value": {
+              "type": ["array", "null"],
+              "items": {
+                "type": "object",
+                "required": ["module", "version"],
+                "properties": { "module": { "type": "string" }, "version": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "security.install_lock": { "$ref": "#/$defs/booleanCheck" },
+        "security.conf_permissions": { "$ref": "#/$defs/stringCheck", "description": "Octal mode of conf.php." },
+        "security.prod_mode": { "$ref": "#/$defs/booleanCheck" },
+        "security.login_failures_24h": { "$ref": "#/$defs/integerCheck" },
+        "dolicli.operation": {
+          "$ref": "#/$defs/check",
+          "properties": { "value": { "type": ["object", "null"] } }
+        },
+        "tls.expiry_seconds": { "$ref": "#/$defs/integerCheck" }
+      }
+    }
+  },
+  "$defs": {
+    "globalStatus": { "enum": ["ok", "warning", "critical", "unknown"] },
+    "check": {
+      "type": "object",
+      "required": ["status", "value", "message", "collected_at"],
+      "properties": {
+        "status": { "enum": ["ok", "warning", "critical", "unknown", "skipped"] },
+        "value": { "description": "Raw value, in the unit of the check; null when unknown or skipped." },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "warning": { "type": "number" }, "critical": { "type": "number" } }
+        },
+        "message": { "description": "Short readable text, in English.", "type": "string" },
+        "collected_at": { "type": "string", "format": "date-time" },
+        "frequency": { "enum": ["fast", "slow", "computed"] }
+      }
+    },
+    "integerCheck": {
+      "$ref": "#/$defs/check",
+      "properties": { "value": { "type": ["integer", "null"] } }
+    },
+    "booleanCheck": {
+      "$ref": "#/$defs/check",
+      "properties": { "value": { "type": ["boolean", "null"] } }
+    },
+    "stringCheck": {
+      "$ref": "#/$defs/check",
+      "properties": { "value": { "type": ["string", "null"] } }
+    }
+  }
+}

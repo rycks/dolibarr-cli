@@ -126,6 +126,17 @@ abstract class Command
     }
 
     /**
+     * Output that replaces the envelope (state file, Zabbix discovery): null to use the envelope.
+     *
+     * @param array<string, mixed> $data
+     * @return string|null
+     */
+    public function rawResult(array $data)
+    {
+        return null;
+    }
+
+    /**
      * Called when Dolibarr exits or fails while loading (database unreachable...),
      * before the error envelope is written.
      */
