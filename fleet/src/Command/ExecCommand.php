@@ -20,6 +20,7 @@ final class ExecCommand extends FleetCommand
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Describe the actions without doing them')
             ->addOption('continue-on-error', null, InputOption::VALUE_NONE, 'Go on with the other instances after a failure')
             ->addTargetOptions()
+            ->addConfirmOption()
             ->addJsonOption()
             ->setHelp("Example: dolifleet exec tag:preprod -- user list\nWrites run in series, the first instance as a witness; destructive commands are refused on several instances.");
     }
@@ -29,6 +30,7 @@ final class ExecCommand extends FleetCommand
         $target = (string) $this->input->getArgument('target');
         $outcomes = $this->batch()->run($this->targets($target), array_values((array) $this->input->getArgument('words')), [
             'yes' => (bool) $this->input->getOption('yes'),
+            'answer' => $this->confirmAnswer(),
             'dry_run' => (bool) $this->input->getOption('dry-run'),
             'continue_on_error' => (bool) $this->input->getOption('continue-on-error'),
             'target' => $target,

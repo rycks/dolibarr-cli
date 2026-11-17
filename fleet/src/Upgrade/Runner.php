@@ -28,7 +28,7 @@ final class Runner
     /** @var callable(string): void */
     private $say;
 
-    /** @var callable(string): bool */
+    /** @var callable(string, string): bool */
     private $confirm;
 
     /** @var array<string, mixed> */
@@ -39,7 +39,7 @@ final class Runner
     /**
      * @param array<string, mixed> $plan
      * @param callable(string): void $say
-     * @param callable(string): bool $confirm Manual step done? (false: pause)
+     * @param callable(string, string): bool $confirm Manual step done? Question and step id (false: pause)
      * @param array{archive?: string, signature?: string} $sources Local archive and signature instead of downloading
      */
     public function __construct(
@@ -123,7 +123,7 @@ final class Runner
 
                 return 'maintenance on';
             case 'manual':
-                return ($this->confirm)((string) $step['description'].' Done?') ? 'confirmed by the administrator' : self::PAUSED;
+                return ($this->confirm)((string) $step['description'].' Done?', (string) $step['id']) ? 'confirmed by the administrator' : self::PAUSED;
             case 'modules-off':
                 $off = [];
                 foreach ((array) $step['modules'] as $module) {
@@ -174,7 +174,7 @@ final class Runner
                 foreach ((array) ($this->plan['deactivated_modules'] ?? []) as $module) {
                     $this->call(['module', 'activate', 'name='.$module]);
                 }
-                if ( ! ($this->confirm)('Resume the scheduled jobs of Dolibarr on the server.')) {
+                if ( ! ($this->confirm)('Resume the scheduled jobs of Dolibarr on the server.', (string) $step['id'])) {
                     return self::PAUSED;
                 }
                 $this->call(['system', 'maintenance', 'disable']);

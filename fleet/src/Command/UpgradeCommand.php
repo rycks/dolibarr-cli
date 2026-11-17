@@ -28,6 +28,8 @@ final class UpgradeCommand extends FleetCommand
             ->addOption('archive', null, InputOption::VALUE_REQUIRED, 'Local archive of the target instead of downloading it')
             ->addOption('signature', null, InputOption::VALUE_REQUIRED, 'Local official signature filelist-X.Y.Z.xml instead of downloading it')
             ->addOption('yes', 'y', InputOption::VALUE_NONE, 'No confirmation: manual steps are considered done (scripts; journaled)')
+            ->addOption('done', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Manual step already done by the administrator (step id, repeatable)')
+            ->addConfirmOption()
             ->addJsonOption();
     }
 
@@ -85,7 +87,7 @@ final class UpgradeCommand extends FleetCommand
         $this->showPlan($plan);
         $yes = (bool) $this->input->getOption('yes');
         if ( ! $yes) {
-            $answer = $this->ask("Upgrade {$instance->id} from {$plan['from']} to {$plan['to']}: type the name of the instance to confirm: ");
+            $answer = '' !== $this->confirmAnswer() ? $this->confirmAnswer() : $this->ask("Upgrade {$instance->id} from {$plan['from']} to {$plan['to']}: type the name of the instance to confirm: ");
             if (null === $answer) {
                 throw new InventoryException('Confirmation required: run in a terminal, or add --yes (journaled).');
             }
@@ -94,12 +96,18 @@ final class UpgradeCommand extends FleetCommand
             }
         }
 
+        $done = array_values(array_map('strval', (array) $this->input->getOption('done')));
         $runner = new Runner(
             $this->dolicli(),
             $instance,
             $plan,
             fn (string $message) => $this->progress($message),
-            function (string $question) use ($yes): bool {
+            function (string $question, string $step) use ($yes, $done): bool {
+                if (in_array($step, $done, true)) {
+                    $this->progress('Manual step done by the administrator (--done='.$step.'): '.$question);
+
+                    return true;
+                }
                 if ($yes) {
                     $this->progress('Manual step considered done (--yes): '.$question);
 

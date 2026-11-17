@@ -22,6 +22,7 @@ final class MaintenanceCommand extends FleetCommand
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Describe the actions without doing them')
             ->addOption('continue-on-error', null, InputOption::VALUE_NONE, 'Go on with the other instances after a failure')
             ->addTargetOptions()
+            ->addConfirmOption()
             ->addJsonOption();
     }
 
@@ -34,6 +35,7 @@ final class MaintenanceCommand extends FleetCommand
         $target = (string) $this->input->getArgument('target');
         $options = [
             'yes' => (bool) $this->input->getOption('yes'),
+            'answer' => $this->confirmAnswer(),
             'dry_run' => (bool) $this->input->getOption('dry-run'),
             'continue_on_error' => (bool) $this->input->getOption('continue-on-error'),
             'target' => $target,

@@ -48,7 +48,7 @@ final class Batch
     /**
      * @param array<string, Instance> $instances
      * @param list<string> $arguments dolicli arguments, command words first
-     * @param array{yes?: bool, dry_run?: bool, continue_on_error?: bool, target?: string, extra?: callable(Instance): list<string>, detach?: bool} $options
+     * @param array{yes?: bool, answer?: string, dry_run?: bool, continue_on_error?: bool, target?: string, extra?: callable(Instance): list<string>, detach?: bool} $options
      * @return array<string, Outcome>
      */
     public function run(array $instances, array $arguments, array $options = []): array
@@ -87,6 +87,7 @@ final class Batch
         $this->journal->intention($run, (string) ($options['target'] ?? implode(',', array_keys($instances))), $name, $arguments, $sensitive, [
             'instances' => array_keys($instances),
             'yes' => ! empty($options['yes']),
+            'via' => self::frontEnd(),
         ]);
 
         $outcomes = [];
@@ -116,8 +117,21 @@ final class Batch
     }
 
     /**
+     * Front end that started the pilot (DOLIFLEET_FRONTEND: console, dashboard), cli otherwise.
+     */
+    public static function frontEnd(): string
+    {
+        $front = getenv('DOLIFLEET_FRONTEND');
+
+        return is_string($front) && 1 === preg_match('/^[a-z]{1,20}$/', $front) ? $front : 'cli';
+    }
+
+    /**
+     * The answer comes from the operator, or from a front end that asked the same question
+     * itself (--confirm): it is checked against the same expected value either way.
+     *
      * @param array<string, Instance> $instances
-     * @param array{yes?: bool, target?: string} $options
+     * @param array{yes?: bool, answer?: string, target?: string} $options
      */
     private function confirm(array $instances, string $command, array $options): void
     {
@@ -138,7 +152,7 @@ final class Batch
             $expected = '' !== $target ? $target : 'yes';
             $question = "Type the exact target ({$expected}) to confirm: ";
         }
-        $answer = ($this->ask)($question);
+        $answer = isset($options['answer']) && '' !== $options['answer'] ? $options['answer'] : ($this->ask)($question);
         if (null === $answer) {
             throw new InventoryException('Confirmation required: run in a terminal, or add --yes (journaled).');
         }

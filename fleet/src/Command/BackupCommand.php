@@ -24,8 +24,10 @@ final class BackupCommand extends FleetCommand
             ->addOption('modules', null, InputOption::VALUE_NONE, 'Zip the external modules')
             ->addOption('dir', null, InputOption::VALUE_REQUIRED, 'Destination directory on the server')
             ->addOption('yes', 'y', InputOption::VALUE_NONE, 'No confirmation (scripts; journaled)')
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Describe the files that would be written, start nothing')
             ->addOption('continue-on-error', null, InputOption::VALUE_NONE, 'Go on with the other instances after a failure')
             ->addTargetOptions()
+            ->addConfirmOption()
             ->addJsonOption();
     }
 
@@ -48,13 +50,18 @@ final class BackupCommand extends FleetCommand
             $arguments[] = 'dir='.$dir;
         }
         $target = (string) $this->input->getArgument('target');
+        $dryRun = (bool) $this->input->getOption('dry-run');
         $outcomes = $this->batch()->run($this->targets($target), $arguments, [
             'yes' => (bool) $this->input->getOption('yes'),
+            'answer' => $this->confirmAnswer(),
+            'dry_run' => $dryRun,
             'continue_on_error' => (bool) $this->input->getOption('continue-on-error'),
             'target' => $target,
             'detach' => true,
         ]);
 
-        return $this->outcomes($outcomes, static fn (Outcome $outcome): string => 'job '.(string) ($outcome->data()['id'] ?? '?').' started: dolifleet jobs '.$outcome->instance->id);
+        return $this->outcomes($outcomes, static fn (Outcome $outcome): string => $dryRun
+            ? 'dry run: '.implode('; ', array_map('strval', (array) ($outcome->data()['actions'] ?? [])))
+            : 'job '.(string) ($outcome->data()['id'] ?? '?').' started: dolifleet jobs '.$outcome->instance->id);
     }
 }

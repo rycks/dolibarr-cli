@@ -263,3 +263,52 @@ it('runs an upgrade plan step by step and stops with the maintenance on when a s
     expect($restore['code'])->toBe(0)
         ->and(is_link($instance['htdocs'].'/main.inc.php'))->toBeTrue();
 });
+
+it('accepts the confirmation answer of a front end, checks it and journals the front end', function (): void {
+    $wrong = fleet(['exec', 'dev1', '--json', '--confirm=dev2', '--', 'system', 'maintenance', 'enable']);
+    $right = fleet(['exec', 'dev1', '--json', '--confirm=dev1', '--', 'system', 'maintenance', 'enable'], null, ['DOLIFLEET_FRONTEND' => 'console']);
+    fleet(['maintenance', 'off', 'dev1', '--confirm=dev1']);
+    $journal = fleetJournal();
+
+    expect($wrong['code'])->toBe(2)
+        ->and($wrong['err'])->toContain('Not confirmed')
+        ->and($right['code'])->toBe(0)
+        ->and(json_decode($right['out'], true)['instances']['dev1']['envelope']['data']['enabled'])->toBeTrue()
+        ->and($journal[0]['via'])->toBe('console')
+        ->and($journal[0]['yes'])->toBeFalse()
+        ->and($journal[2]['via'])->toBe('cli')
+        ->and(dbValue("SELECT COUNT(*) FROM llx_const WHERE name = 'MAIN_ONLY_LOGIN_ALLOWED'"))->toBe(0);
+});
+
+it('describes a backup with --dry-run without starting a job nor journaling', function (): void {
+    $result = fleetJson(['backup', 'dev2', '--database', '--documents', '--dry-run']);
+    $data = $result['json']['instances']['dev2']['envelope']['data'];
+
+    expect($result['code'])->toBe(0)
+        ->and($data['dry_run'])->toBeTrue()
+        ->and(implode(' ', $data['actions']))->toContain('-database.sql')
+        ->and(fleetJournal())->toBe([]);
+});
+
+it('pauses an upgrade at a manual step without a terminal, and resumes it once the step is declared done', function (): void {
+    $instance = isolatedInstance();
+    $release = fakeRelease('18.0.11');
+    $archive = dirname($release['tree']).'/dolibarr-18.0.11.tgz';
+    exec('tar -czf '.escapeshellarg($archive).' -C '.escapeshellarg(dirname($release['tree'])).' htdocs');
+    $account = (string) (posix_getpwuid(posix_geteuid())['name'] ?? '');
+    fleetInventory("  local-iso:\n    php: ".PHP_BINARY."\n    instances:\n      iso:\n        htdocs: {$instance['htdocs']}\n        run_as: {$account}\n        maintenance_login: admin\n");
+    $sources = ['--archive='.$archive, '--signature='.$release['signature']];
+
+    $plan = fleetJson(['upgrade', 'plan', 'iso', '--to=18.0.11']);
+    $manual = array_values(array_filter($plan['json']['steps'], fn (array $step): bool => 'manual' === $step['type']))[0]['id'];
+    $refused = fleet(array_merge(['upgrade', 'run', 'iso', '--json', '--confirm=other'], $sources));
+    $paused = fleetJson(array_merge(['upgrade', 'run', 'iso', '--confirm=iso'], $sources));
+    $resumed = fleetJson(array_merge(['upgrade', 'resume', 'iso', '--confirm=iso', '--done='.$manual], $sources));
+
+    expect($refused['code'])->toBe(2)
+        ->and($paused['code'])->toBe(0)
+        ->and($paused['json']['state'])->toBe('paused')
+        ->and($paused['json']['plan']['progress'][$manual]['state'])->toBe('paused')
+        ->and($resumed['json']['plan']['progress'][$manual]['state'])->toBe('done')
+        ->and($resumed['json']['plan']['progress']['backup']['state'])->toBe('done');
+});

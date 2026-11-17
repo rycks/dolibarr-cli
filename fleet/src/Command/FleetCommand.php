@@ -139,6 +139,20 @@ abstract class FleetCommand extends Command
         return $this->addOption('exclude', null, InputOption::VALUE_REQUIRED, 'Target to remove from the selection', '');
     }
 
+    /**
+     * Answer to the confirmation question given by a front end that asked it itself (console,
+     * dashboard). Checked against the expected answer exactly like a typed one.
+     */
+    protected function addConfirmOption(): static
+    {
+        return $this->addOption('confirm', null, InputOption::VALUE_REQUIRED, 'Answer to the confirmation question (front ends)', '');
+    }
+
+    protected function confirmAnswer(): string
+    {
+        return $this->getDefinition()->hasOption('confirm') ? (string) $this->input->getOption('confirm') : '';
+    }
+
     protected function ask(string $question): ?string
     {
         if ( ! $this->input->isInteractive() || ! (function_exists('posix_isatty') ? posix_isatty(STDIN) : stream_isatty(STDIN))) {
