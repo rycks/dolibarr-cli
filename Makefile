@@ -8,13 +8,14 @@ TMP          = /tmp/$(USER)/$(MODULE)
 # PHP binaries of the compatibility matrix present on this machine (syntax check of the body).
 PHP_MATRIX   ?= $(foreach v,7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3 8.4 8.5,$(wildcard /usr/bin/php$(v)))
 
-.PHONY: help deploy-doc screenshots build test lint lint-server phpstan phpstan-all
+.PHONY: help deploy-doc screenshots build fleet-phar test lint lint-server phpstan phpstan-all
 
 help:
 	@echo ''
 	@echo 'Usage: make <target>'
 	@echo ''
 	@echo '  build         -  build the dolicli body and launcher in dist/'
+	@echo '  fleet-phar    -  build dist/dolifleet.phar (pilot, with the dolicli body)'
 	@echo '  test          -  run unit and integration tests (SQLite Dolibarr from composer)'
 	@echo '  lint          -  PHP syntax, code style (phpcs for server/, pint for the rest)'
 	@echo '  lint-server   -  php -l of the built body under every PHP of the matrix, PHP 7.0 compatibility'
@@ -26,6 +27,9 @@ help:
 
 build:
 	php build/build-server.php
+
+fleet-phar: build
+	vendor/bin/box compile
 
 test: build
 	vendor/bin/pest

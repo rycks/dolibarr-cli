@@ -1,0 +1,12 @@
+body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #1f2933; }
+nav a { margin-right: 1rem; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+th, td { border-bottom: 1px solid #d9e2ec; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+th { background: #f0f4f8; }
+pre { background: #f0f4f8; padding: 0.75rem; overflow: auto; }
+.status-ok td:nth-child(2), p.status-ok { color: #1f7a3a; }
+.status-warning td:nth-child(2) { color: #9a6700; }
+.status-critical td:nth-child(2), p.status-critical { color: #b42318; }
+.status-unknown td:nth-child(2) { color: #52606d; }
+.protected { font-size: 0.75rem; padding: 0 0.3rem; border: 1px solid #b42318; color: #b42318; border-radius: 3px; }
+button.action { font-size: 0.8rem; margin: 0.1rem; }

@@ -1,0 +1,15 @@
+{
+    "main": "fleet/bin/dolifleet",
+    "output": "dist/dolifleet.phar",
+    "directories": ["fleet/src", "fleet/web", "server/src"],
+    "files": ["LICENSE", "dist/dolicli.php", "server/launcher.php"],
+    "finder": [
+        {
+            "in": "vendor",
+            "exclude": ["cap-rel", "pestphp", "phpunit", "phpstan", "laravel", "humbug", "squizlabs", "phpcompatibility", "phpcsstandards", "opis", "dealerdirect"]
+        }
+    ],
+    "exclude-composer-files": false,
+    "exclude-dev-files": true,
+    "compression": "GZ"
+}

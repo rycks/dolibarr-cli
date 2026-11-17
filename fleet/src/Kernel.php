@@ -13,6 +13,7 @@ use Dolifleet\Command\ExecCommand;
 use Dolifleet\Command\JobsCommand;
 use Dolifleet\Command\LogCommand;
 use Dolifleet\Command\MaintenanceCommand;
+use Dolifleet\Command\ServeCommand;
 use Dolifleet\Command\SessionsCommand;
 use Dolifleet\Command\SetupCommand;
 use Dolifleet\Command\StatusCommand;
@@ -42,6 +43,7 @@ final class Kernel
             new SessionsCommand(),
             new JobsCommand(),
             new UpgradeCommand(),
+            new ServeCommand(),
         ]);
 
         return $application;
