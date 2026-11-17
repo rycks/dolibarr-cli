@@ -56,7 +56,7 @@ Chaque contrôle porte un statut (`ok`, `warning`, `critical`, `unknown`, `skipp
 | `security.login_failures_24h` | rapide | échecs de connexion sur 24 h (si l'audit des connexions est actif) |
 | `dolicli.operation` | rapide | opération en cours |
 | `users.active` | lente | utilisateurs actifs |
-| `backup.age` | lente | âge de la sauvegarde la plus récente (`documents/admin/backup/`, `backup_dir`) |
+| `backup.age` | lente | âge de la sauvegarde la plus récente (`documents/admin/backup/`, `documents/admin/documents/`, `backup_dir`) |
 | `storage.documents_bytes`, `storage.database_bytes` | lente | tailles de `documents/` et de la base |
 | `filecheck.modified`, `filecheck.missing`, `filecheck.added` | lente | fichiers modifiés, manquants, ajoutés (signature locale) |
 | `modules.external` | lente | modules externes actifs et leur version |

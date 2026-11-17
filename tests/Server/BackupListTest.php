@@ -29,6 +29,7 @@ it('lists the backups of documents/admin/backup and backup_dir, newest first, li
     $now = time();
     $instance = isolatedInstance();
     $adminBackup = realpath($instance['documents']).'/admin/backup';
+    $adminDocuments = realpath($instance['documents']).'/admin/documents';
     $external = DOLICLI_TEST_TMP.'/external-backups-'.bin2hex(random_bytes(4));
     backupFixture($adminBackup.'/mysqldump_dolibarr_18.0.10_202611140200.sql.gz', $now - 3 * 86400, str_repeat('d', 2048));
     backupFixture($adminBackup.'/pg_dump_dolibarr_18.0.10_202611070200.sql.bz2', $now - 10 * 86400);
@@ -60,11 +61,31 @@ it('lists the backups of documents/admin/backup and backup_dir, newest first, li
         ->and($byFile['mysqldump_dolibarr_18.0.10_202611140200.sql.gz'])->toMatchArray(['path' => $adminBackup.'/mysqldump_dolibarr_18.0.10_202611140200.sql.gz', 'bytes' => 2048])
         ->and($data['count'])->toBe(8)
         ->and($data['latest'])->toBe(date('c', $now - 3600))
-        ->and($data['dirs'])->toBe([$adminBackup, $external])
+        ->and($data['dirs'])->toBe([$adminBackup, $adminDocuments, $external])
         ->and($data['unreadable'])->toBe([])
         ->and(json_encode($result['json']))->not->toContain('SQL"')
         ->and($state['checks']['backup.age']['message'])->toContain('20261117-020000-database.sql')
         ->and($state['checks']['backup.age']['value'])->toBeGreaterThanOrEqual(3600)->toBeLessThan(3700);
+});
+
+it('finds the archives of documents/ made by the Dolibarr admin tools in documents/admin/documents', function (): void {
+    $now = time();
+    $instance = isolatedInstance();
+    $adminDocuments = realpath($instance['documents']).'/admin/documents';
+    backupFixture(realpath($instance['documents']).'/admin/backup/mysqldump_dolibarr_18.0.10_202611100200.sql', $now - 7 * 86400);
+    backupFixture($adminDocuments.'/documents_dolibarr_18.0.10_202611160200.tar.gz', $now - 86400);
+    backupFixture($adminDocuments.'/weekly-archive.tgz', $now - 2 * 3600);
+    mkdir($adminDocuments.'/newer');
+    declareBackupInstance('isotest', $instance['htdocs']);
+
+    $data = serverJson(['backup', 'list', '--instance=isotest'])['json']['data'];
+    $state = json_decode(server(['monitor', 'collect', '--slow', '--stdout', '--instance=isotest'])['out'], true);
+
+    expect(array_column($data['backups'], 'file'))->toBe(['weekly-archive.tgz', 'documents_dolibarr_18.0.10_202611160200.tar.gz', 'mysqldump_dolibarr_18.0.10_202611100200.sql'])
+        ->and(array_column($data['backups'], 'kind'))->toBe(['documents', 'documents', 'database'])
+        ->and($data['backups'][0]['path'])->toBe($adminDocuments.'/weekly-archive.tgz')
+        ->and($state['checks']['backup.age']['message'])->toContain('weekly-archive.tgz')
+        ->and($state['checks']['backup.age']['value'])->toBeGreaterThanOrEqual(7200)->toBeLessThan(7300);
 });
 
 it('applies backup_pattern and renders a table', function (): void {
@@ -83,7 +104,7 @@ it('applies backup_pattern and renders a table', function (): void {
         ->and($text['code'])->toBe(0)
         ->and($text['out'])->toContain('20261117-020000-database.sql.gz  database  1.5 KiB')
         ->and($text['out'])->toContain('1.0 h')
-        ->and($text['out'])->toContain('Searched: '.realpath($instance['documents']).'/admin/backup, '.$external);
+        ->and($text['out'])->toContain('Searched: '.realpath($instance['documents']).'/admin/backup, '.realpath($instance['documents']).'/admin/documents, '.$external);
 });
 
 it('lists the backups without the database and reports the directories it cannot list', function (): void {
@@ -122,10 +143,11 @@ it('answers an empty list when no backup exists', function (): void {
     $result = serverJson(['backup', 'list']);
     $text = server(['backup', 'list', '--format=text']);
     $dir = realpath(DOLICLI_TEST_DOCUMENTS).'/admin/backup';
+    $documents = realpath(DOLICLI_TEST_DOCUMENTS).'/admin/documents';
 
     expect($result['code'])->toBe(0)
-        ->and($result['json']['data'])->toBe(['backups' => [], 'count' => 0, 'latest' => null, 'dirs' => [$dir], 'unreadable' => []])
-        ->and($text['out'])->toBe("No backup found in {$dir}.\n");
+        ->and($result['json']['data'])->toBe(['backups' => [], 'count' => 0, 'latest' => null, 'dirs' => [$dir, $documents], 'unreadable' => []])
+        ->and($text['out'])->toBe("No backup found in {$dir}, {$documents}.\n");
 });
 
 it('keeps backup as a write command next to the read command backup list', function (): void {

@@ -37,11 +37,13 @@ final class ListCommand extends Command
 
     public function help(): string
     {
-        return "Searches documents/admin/backup (database dumps of the Dolibarr admin tools) and the backup_dir of\n"
-            . "instances.ini, with its backup_pattern (default *): the places of the monitor check backup.age.\n"
-            . "kind comes from the name: database (*.sql, .sql.gz, .bz2, .zst, .xz), documents (-documents.zip,\n"
-            . "documents_*.zip or .tar.*), modules (-modules.zip), unknown otherwise. Directories that exist but\n"
-            . 'cannot be listed are reported in unreadable, with a warning.';
+        return "Searches documents/admin/backup (database dumps of the Dolibarr admin tools), documents/admin/documents\n"
+            . "(archives of documents/ made by the same tools) and the backup_dir of instances.ini, with its\n"
+            . "backup_pattern (default *): the places of the monitor check backup.age. Every file of\n"
+            . "documents/admin/documents is of kind documents; elsewhere kind comes from the name: database (*.sql,\n"
+            . ".sql.gz, .bz2, .zst, .xz), documents (-documents.zip, documents_*.zip or .tar.*), modules\n"
+            . "(-modules.zip), unknown otherwise. Directories that exist but cannot be listed are reported in\n"
+            . 'unreadable, with a warning.';
     }
 
     public function execute(Context $ctx): array
@@ -69,7 +71,7 @@ final class ListCommand extends Command
             $backups[] = [
                 'file' => basename($path),
                 'path' => $path,
-                'kind' => BackupFiles::kind($path),
+                'kind' => $finder->kindOf($path),
                 'bytes' => (int) $bytes,
                 'date' => date('c', $mtime),
                 'age_seconds' => max(0, $now - $mtime),

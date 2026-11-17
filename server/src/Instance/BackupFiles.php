@@ -4,8 +4,10 @@ namespace Dolicli\Instance;
 
 /**
  * Backup files of an instance, read without Dolibarr: documents/admin/backup (database dumps of
- * Dolibarr) and the backup_dir of instances.ini, filtered by backup_pattern (default *). Shared by
- * the monitor check backup.age and by backup list so that they search the same places.
+ * the Dolibarr admin tools), documents/admin/documents (archives of documents/ made by the same
+ * tools, Dolibarr 10 to 24) and the backup_dir of instances.ini, filtered by backup_pattern
+ * (default *). Shared by the monitor check backup.age and by backup list so that they search the
+ * same places.
  */
 final class BackupFiles
 {
@@ -13,11 +15,15 @@ final class BackupFiles
     private $dirs;
 
     /** @var string */
+    private $documentsDir;
+
+    /** @var string */
     private $pattern;
 
     public function __construct(Instance $instance, string $dataRoot)
     {
-        $this->dirs = [$dataRoot . '/admin/backup'];
+        $this->documentsDir = $dataRoot . '/admin/documents';
+        $this->dirs = [$dataRoot . '/admin/backup', $this->documentsDir];
         if ('' !== $instance->setting('backup_dir')) {
             $this->dirs[] = $instance->setting('backup_dir');
         }
@@ -102,6 +108,20 @@ final class BackupFiles
         }
 
         return $unreadable;
+    }
+
+    /**
+     * Kind of a backup found by this finder: every file of documents/admin/documents is an archive
+     * of the documents (its name follows a template the administrator may change), the others
+     * get their kind from their name.
+     */
+    public function kindOf(string $file): string
+    {
+        if (rtrim(dirname($file), '/') === rtrim($this->documentsDir, '/')) {
+            return 'documents';
+        }
+
+        return self::kind($file);
     }
 
     /**
