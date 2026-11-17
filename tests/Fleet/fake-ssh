@@ -1,0 +1,22 @@
+#!/bin/sh
+# Test double of ssh: runs the remote command on this machine, as the current account.
+# "ssh -G <alias>" answers the configuration; the alias "unreachable" fails like a refused connection.
+if [ "$1" = "-G" ]; then
+    echo "user $(id -un)"
+    echo "controlmaster false"
+    exit 0
+fi
+host=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) shift 2 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *) host="$1"; shift ;;
+    esac
+done
+if [ "$host" = "unreachable" ]; then
+    echo "ssh: connect to host unreachable port 22: Connection refused" >&2
+    exit 255
+fi
+exec sh -c "$1"

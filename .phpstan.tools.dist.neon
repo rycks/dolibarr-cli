@@ -1,7 +1,9 @@
 parameters:
-	# Development tools (build), PHP 8.2.
+	# Pilot (fleet) and development tools (build), PHP 8.2.
 	level: 6
 	phpVersion: 80200
 	paths:
 		- build
+		- fleet/src
+		- fleet/bin/dolifleet
 	reportUnmatchedIgnoredErrors: true

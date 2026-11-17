@@ -9,10 +9,14 @@
         <testsuite name="Server">
             <directory suffix="Test.php">./tests/Server</directory>
         </testsuite>
+        <testsuite name="Fleet">
+            <directory suffix="Test.php">./tests/Fleet</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
             <directory suffix=".php">./server/src</directory>
+            <directory suffix=".php">./fleet/src</directory>
         </include>
     </source>
 </phpunit>

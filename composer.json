@@ -19,10 +19,14 @@
   },
   "bin": [
     "dolibarr",
-    "dolicli"
+    "dolicli",
+    "dolifleet"
   ],
   "require": {
-    "php": ">=8.2"
+    "php": ">=8.2",
+    "symfony/console": "^7.3",
+    "symfony/yaml": "^7.3",
+    "symfony/process": "^7.3"
   },
   "require-dev": {
     "pestphp/pest": "^3.8",
@@ -43,6 +47,11 @@
     "allow-plugins": {
       "pestphp/pest-plugin": true,
       "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "Dolifleet\\": "fleet/src/"
     }
   }
 }
