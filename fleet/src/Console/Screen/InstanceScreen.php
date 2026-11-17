@@ -8,6 +8,7 @@ use Dolifleet\Console\Actions;
 use Dolifleet\Console\App;
 use Dolifleet\Console\Data\Checks;
 use Dolifleet\Console\Data\Row;
+use Dolifleet\Console\Lang\Translator;
 use Dolifleet\Console\Tasks\Command;
 use Dolifleet\Console\Tasks\Task;
 use Dolifleet\Console\Terminal\Line;
@@ -252,6 +253,39 @@ final class InstanceScreen extends Screen implements TargetAware
     private function summary(App $app, Row $row): array
     {
         $t = $app->t;
+        $fields = self::summaryFields($t, $row);
+
+        $labelWidth = 0;
+        foreach ($fields as [$label]) {
+            $labelWidth = max($labelWidth, Line::widthOf($label));
+        }
+        $lines = [];
+        foreach ($fields as [$label, $content, $link]) {
+            $line = Line::of('  '.Line::pad($label, $labelWidth).'  ', 'bold')->append($content);
+            if ('' !== $link) {
+                $line = $line->add('   -> '.$link, 'dim');
+            }
+            $lines[] = $line;
+        }
+        if ([] !== $row->problems) {
+            $lines[] = Line::blank();
+            $lines[] = Line::of('  '.$t->t('summary.problems'), 'bold');
+            foreach ($row->problems as $problem) {
+                $lines[] = Line::of('  '.Signs::sign($problem->status).' ', Signs::style($problem->status))->add($problem->text, Signs::style($problem->status))->add('   -> '.$problem->fix, 'dim');
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Fields of the summary from the local state: label, content, key of the tab that details
+     * it. Shared with the web dashboard, which shows the same fields.
+     *
+     * @return list<array{0: string, 1: Line, 2: string}>
+     */
+    public static function summaryFields(Translator $t, Row $row): array
+    {
         $instance = $row->instance;
         $value = static fn (string $check): mixed => $row->value($check);
         $fields = [];
@@ -296,27 +330,7 @@ final class InstanceScreen extends Screen implements TargetAware
         $modified = $value('filecheck.modified');
         $fields[] = [$t->t('summary.integrity'), Line::of(is_numeric($modified) ? $t->t('summary.integrity_value', (int) $modified, (int) ($value('filecheck.missing') ?? 0)) : '-', is_numeric($modified) && (int) $modified > 0 ? 'warn' : ''), '7'];
 
-        $labelWidth = 0;
-        foreach ($fields as [$label]) {
-            $labelWidth = max($labelWidth, Line::widthOf($label));
-        }
-        $lines = [];
-        foreach ($fields as [$label, $content, $link]) {
-            $line = Line::of('  '.Line::pad($label, $labelWidth).'  ', 'bold')->append($content);
-            if ('' !== $link) {
-                $line = $line->add('   -> '.$link, 'dim');
-            }
-            $lines[] = $line;
-        }
-        if ([] !== $row->problems) {
-            $lines[] = Line::blank();
-            $lines[] = Line::of('  '.$t->t('summary.problems'), 'bold');
-            foreach ($row->problems as $problem) {
-                $lines[] = Line::of('  '.Signs::sign($problem->status).' ', Signs::style($problem->status))->add($problem->text, Signs::style($problem->status))->add('   -> '.$problem->fix, 'dim');
-            }
-        }
-
-        return $lines;
+        return $fields;
     }
 
     /**
