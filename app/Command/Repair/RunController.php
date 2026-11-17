@@ -4,32 +4,55 @@ declare(strict_types=1);
 
 namespace App\Command\Repair;
 
-use Minicli\Command\CommandController;
-use App\Util\DolibarrHelper;
+use App\Support\Command;
+use App\Util\InstallLock;
+use App\Util\InstallScriptRunner;
+use App\Util\Maintenance;
 
-class RunController extends CommandController
+class RunController extends Command
 {
-    private array $actionMapping = [
-        'standard' => 'standard',
-        'force_disable_modules' => 'force_disable_module',
-        'restore_logos' => 'restore_thirdparties_logos',
-        'restore_pictures' => 'restore_user_pictures',
-        'rebuild_thumbs' => 'rebuild_product_thumbs',
-        'clean_linked_elements' => 'clean_linked_elements',
-        'clean_menus' => 'clean_menus',
-        'clean_orphan_dirs' => 'clean_orphelin_dir',
-        'clean_stock_batch' => 'clean_product_stock_batch',
-        'clean_permissions' => 'clean_perm_table',
-        'set_time_spent' => 'set_empty_time_spent_amount',
-        'force_utf8' => 'force_utf8_on_tables',
-        'force_utf8mb4' => 'force_utf8mb4_on_tables',
-        'rebuild_sequences' => 'rebuild_sequences',
-        'repair_dispatch_links' => 'repair_link_dispatch_lines_supplier_order_lines'
+    /**
+     * dolicli action => [install/repair.php option, description].
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    public const ACTIONS = [
+        'standard' => ['standard', 'Run SQL repair scripts + sync extrafields'],
+        'force_disable_modules' => ['force_disable_of_modules_not_found', 'Force disable modules not found'],
+        'restore_logos' => ['restore_thirdparties_logos', 'Restore third party logos'],
+        'restore_pictures' => ['restore_user_pictures', 'Restore user pictures'],
+        'rebuild_thumbs' => ['rebuild_product_thumbs', 'Rebuild product thumbnails'],
+        'clean_linked_elements' => ['clean_linked_elements', 'Clean linked elements table'],
+        'clean_menus' => ['clean_menus', 'Clean menus table'],
+        'clean_orphan_dirs' => ['clean_orphelin_dir', 'Clean orphan directories'],
+        'clean_stock_batch' => ['clean_product_stock_batch', 'Clean product stock batch table'],
+        'clean_stock_negative_batch' => ['clean_product_stock_negative_if_batch', 'Clean negative stock of products with batch'],
+        'clean_permissions' => ['clean_perm_table', 'Clean permissions table'],
+        'set_time_spent' => ['set_empty_time_spent_amount', 'Set empty time spent amounts'],
+        'force_utf8' => ['force_utf8_on_tables', 'Force UTF8 on tables (MySQL/MariaDB)'],
+        'force_utf8mb4' => ['force_utf8mb4_on_tables', 'Force UTF8MB4 on tables (MySQL/MariaDB)'],
+        'rebuild_sequences' => ['rebuild_sequences', 'Rebuild sequences (PostgreSQL)'],
+        'repair_dispatch_links' => ['repair_link_dispatch_lines_supplier_order_lines', 'Repair dispatch/supplier order links'],
+        'repair_supplier_order_ref' => ['repair_supplier_order_duplicate_ref', 'Repair duplicate supplier order references'],
     ];
+
+    private ?InstallLock $installLock = null;
+
+    private ?Maintenance $maintenance = null;
+
+    public static function actionsHelp(string $indent): string
+    {
+        $lines = [];
+        foreach (self::ACTIONS as $action => [, $description]) {
+            $lines[] = $indent.str_pad($action, 27).'- '.$description;
+        }
+
+        return implode("\n", $lines);
+    }
 
     public function usage(): void
     {
-        $this->info("Execute Dolibarr database repair and maintenance functions
+        $this->info("Execute Dolibarr database repair and maintenance functions (install/repair.php)
 
 Usage:
   ./dolibarr repair run action=ACTION [mode=test|confirmed]
@@ -40,141 +63,108 @@ Parameters:
   mode=confirmed     - Confirmed mode: actually executes the repair
 
 Available actions:
-  standard                 - Run SQL repair scripts + sync extrafields
-  force_disable_modules    - Force disable modules not found
-  restore_logos            - Restore third party logos
-  restore_pictures         - Restore user pictures
-  rebuild_thumbs           - Rebuild product thumbnails
-  clean_linked_elements    - Clean linked elements table
-  clean_menus              - Clean menus table
-  clean_orphan_dirs        - Clean orphan directories
-  clean_stock_batch        - Clean product stock batch table
-  clean_permissions        - Clean permissions table
-  set_time_spent           - Set empty time spent amounts
-  force_utf8               - Force UTF8 on tables (MySQL/MariaDB)
-  force_utf8mb4            - Force UTF8MB4 on tables (MySQL/MariaDB)
-  rebuild_sequences        - Rebuild sequences (PostgreSQL)
-  repair_dispatch_links    - Repair dispatch/supplier order links
+".self::actionsHelp('  ').'
 
 Examples:
   ./dolibarr repair run action=clean_menus mode=test
   ./dolibarr repair run action=clean_menus mode=confirmed
-  ./dolibarr repair run action=standard mode=confirmed");
+  ./dolibarr repair run action=standard mode=confirmed');
     }
 
     public function handle(): void
     {
-        global $db, $conf, $user;
-
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        if (!$this->hasParam('action')) {
-            $this->error("Parameter 'action' is required!");
+        $action = $this->param('action');
+        if (null === $action) {
             $this->usage();
+            $this->fail("Parameter 'action' is required.");
+
             return;
         }
 
-        $action = $this->getParam('action');
-        $mode = $this->getParam('mode') ?? 'test';
+        $mode = $this->param('mode') ?? 'test';
+        if ( ! in_array($mode, ['test', 'confirmed'], true)) {
+            $this->fail("Invalid mode '{$mode}': must be 'test' or 'confirmed'.");
 
-        if (!in_array($mode, ['test', 'confirmed'])) {
-            $this->error("Invalid mode '$mode'. Must be 'test' or 'confirmed'.");
             return;
         }
 
-        if (!isset($this->actionMapping[$action])) {
-            $this->error("Unknown action '$action'");
+        if ( ! isset(self::ACTIONS[$action])) {
             $this->usage();
+            $this->fail("Unknown action '{$action}'.");
+
             return;
         }
 
-        // Get the repair.php action name
-        $repairAction = $this->actionMapping[$action];
-
-        // Load required libraries
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
-
-        $this->info("Executing repair action: $action");
-        $this->info("Mode: $mode\n");
-
-        // Check if we're already in maintenance mode
-        $wasInMaintenanceMode = !empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
-        $maintenanceUser = null;
-
-        if (!$wasInMaintenanceMode) {
-            // Find first super admin user
-            $maintenanceUser = DolibarrHelper::findFirstSuperAdmin();
-            if (!$maintenanceUser) {
-                $this->error("No super admin user found! Cannot enable maintenance mode.");
-                $this->info("Please ensure at least one active super admin exists.");
-                return;
-            }
-
-            $this->info("Enabling temporary maintenance mode (user  $maintenanceUser)...");
-            dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $maintenanceUser, 'chaine', 0, 'Temporary maintenance for repair', $conf->entity);
-            // Reload conf to get the new value
-            $conf->global->MAIN_ONLY_LOGIN_ALLOWED = $maintenanceUser;
+        if ( ! $this->requireDolibarr()) {
+            return;
         }
 
+        $option = self::ACTIONS[$action][0];
+        $this->info("Executing repair action: {$action} ({$option}={$mode})\n");
+
+        $this->maintenance = new Maintenance();
+        $login = $this->maintenance->enable('Temporary maintenance for repair');
+        if (null === $login) {
+            $this->fail($this->maintenance->lastError());
+
+            return;
+        }
+        if ($this->maintenance->wasEnabledByUs()) {
+            $this->info("Maintenance mode enabled (only {$login} can log in)");
+        }
+
+        // repair.php refuses to run when install.lock exists, unless it is allowed through upgrade.unlock.
+        $this->installLock = InstallLock::forCurrentInstall();
+        $this->installLock->open();
+        register_shutdown_function([$this, 'cleanup']);
+
+        $runner = new InstallScriptRunner(fn (string $text) => $this->rawOutput($text));
         try {
-            // Prepare GET parameters to simulate repair.php call
-            $_GET['action'] = $repairAction;
-
-            if ($repairAction === 'standard') {
-                $_GET['standard'] = ($mode === 'confirmed') ? 'confirmed' : 'test';
-            } else {
-                $_GET[$repairAction] = ($mode === 'confirmed') ? 'confirmed' : 'test';
-            }
-
-            // Capture output from repair.php
-            ob_start();
-
-            // Include repair.php which will execute the repair
-            $repairFile = DOL_DOCUMENT_ROOT . '/install/repair.php';
-
-            if (!file_exists($repairFile)) {
-                throw new \Exception("Repair file not found: $repairFile");
-            }
-
-            // Execute repair.php
-            include $repairFile;
-
-            // Get the output
-            $output = ob_get_clean();
-
-            // Parse and display the output (strip HTML tags for CLI)
-            $cleanOutput = strip_tags($output);
-            $cleanOutput = html_entity_decode($cleanOutput, ENT_QUOTES | ENT_HTML5);
-
-            // Display the output
-            $this->rawOutput($cleanOutput);
-
-        } catch (\Exception $e) {
-            ob_end_clean();
-            $this->error("Error executing repair  " . $e->getMessage());
+            // The 'cli' argument makes repair.php exit with code 1 when it fails.
+            $code = $runner->run(
+                DOL_DOCUMENT_ROOT.'/install',
+                'repair.php',
+                ['cli'],
+                ['action' => 'repair', $option => $mode],
+                ['ALLOWED_IF_UPGRADE_UNLOCK_FOUND']
+            );
         } finally {
-            // Clean up GET parameters
-            unset($_GET['action']);
-            unset($_GET['standard']);
-            unset($_GET[$repairAction]);
-
-            // Restore maintenance mode state
-            if (!$wasInMaintenanceMode) {
-                $this->info("\nDisabling temporary maintenance mode...");
-                dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity);
-                unset($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
-            }
+            $this->cleanup();
         }
 
         $this->rawOutput("\n");
-        $this->success("Repair action completed");
+        if (0 !== $code) {
+            $stderr = trim($runner->getStderr());
+            if ('' !== $stderr) {
+                $this->error("[repair.php stderr]\n".$stderr);
+            }
+            $this->fail("Repair action '{$action}' failed (repair.php exit code {$code}).");
+
+            return;
+        }
+
+        $this->success("Repair action '{$action}' completed (mode {$mode}).");
     }
 
-    public function required(): array
+    /**
+     * Lock the install pages again and leave maintenance mode. Runs at the end and at shutdown.
+     */
+    public function cleanup(): void
     {
-        return [];
+        $this->installLock?->close();
+        $this->installLock = null;
+
+        if (null !== $this->maintenance && $this->maintenance->wasEnabledByUs()) {
+            $this->info('Disabling maintenance mode...');
+            if ( ! $this->maintenance->disable()) {
+                $this->fail('Cannot disable maintenance mode: run ./dolibarr system maintenance disable');
+            }
+        }
     }
 }

@@ -12,6 +12,7 @@ use App\Util\FileSignature;
 use App\Util\Http;
 use App\Util\InstallLock;
 use App\Util\InstallScriptRunner;
+use App\Util\Maintenance;
 use App\Util\MigrationPlanner;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
@@ -40,7 +41,7 @@ class UpgradeController extends Command
 
     private ?InstallLock $installLock = null;
 
-    private bool $maintenanceEnabledByUs = false;
+    private Maintenance $maintenance;
 
     public function usage(): void
     {
@@ -92,6 +93,8 @@ Notes:
 
     public function handle(): void
     {
+        $this->maintenance = new Maintenance();
+
         if ($this->hasFlag('help')) {
             $this->usage();
 
@@ -580,7 +583,6 @@ Notes:
         }
         $this->rawOutput("\n");
 
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
         if ( ! $this->enableMaintenance('Temporary maintenance for upgrade')) {
             return false;
         }
@@ -650,44 +652,28 @@ Notes:
 
     private function enableMaintenance(string $note): bool
     {
-        global $db, $conf;
-
-        if ( ! empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED)) {
-            return true;
-        }
-
-        $login = DolibarrHelper::findFirstSuperAdmin();
+        $login = $this->maintenance->enable($note);
         if (null === $login) {
-            $this->fail('No super admin user found: cannot enable maintenance mode.');
+            $this->fail($this->maintenance->lastError());
 
             return false;
         }
-
-        $this->info("Enabling maintenance mode (user: {$login})...");
-        if (dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $login, 'chaine', 0, $note, $conf->entity) <= 0) {
-            $this->fail('Cannot enable maintenance mode: '.$db->lasterror());
-
-            return false;
+        if ($this->maintenance->wasEnabledByUs()) {
+            $this->info("Maintenance mode enabled (only {$login} can log in)");
         }
-        $conf->global->MAIN_ONLY_LOGIN_ALLOWED = $login;
-        $this->maintenanceEnabledByUs = true;
 
         return true;
     }
 
     private function disableMaintenance(): void
     {
-        global $db, $conf;
-
-        if ( ! $this->maintenanceEnabledByUs) {
+        if ( ! $this->maintenance->wasEnabledByUs()) {
             return;
         }
-        $this->maintenanceEnabledByUs = false;
         $this->info('Disabling maintenance mode...');
-        if (dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity) < 0) {
+        if ( ! $this->maintenance->disable()) {
             $this->fail('Cannot disable maintenance mode: run ./dolibarr system maintenance disable');
         }
-        unset($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
     }
 
     // ==================== CLEANUP, OWNERSHIP ====================
