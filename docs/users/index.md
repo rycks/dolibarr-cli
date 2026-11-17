@@ -13,7 +13,7 @@ type: "module-dolibarr"
 **Dolicli** administre Dolibarr en ligne de commande. Il se compose de deux programmes :
 
 - **dolicli**, sur le serveur, à côté de Dolibarr : un fichier PHP unique qui fonctionne avec n'importe quel PHP CLI 7.0 ou plus, sans dépendance, et passe par les classes de Dolibarr pour que chaque écriture suive la même logique que l'interface web ;
-- **dolifleet**, le pilote, sur le poste de l'administrateur : il administre un parc de serveurs joints par SSH, avec des garde-fous, et calcule puis exécute les montées de version.
+- **dolifleet**, le pilote, sur le poste de l'administrateur : il administre un parc de serveurs joints par SSH, avec des garde-fous, et calcule puis exécute les montées de version. Tapé seul, il ouvre une console plein écran, en français ou en anglais.
 
 ## Pourquoi Dolicli ?
 

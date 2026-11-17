@@ -1,12 +1,91 @@
 ---
 title: "Pilote dolifleet"
 weight: 40
-description: "Administrer un parc de Dolibarr depuis un poste : inventaire, ciblage, garde-fous, montée de version, tableau de bord."
+description: "Administrer un parc de Dolibarr depuis un poste : console, inventaire, ciblage, garde-fous, montée de version, tableau de bord."
 ---
 
 # Pilote dolifleet
 
 `dolifleet` s'exécute sur le poste de l'administrateur (PHP 8.2 ou plus, distribué en `dolifleet.phar`) et administre un parc de serveurs Dolibarr joints par SSH. Il embarque le corps de Dolicli : sur un serveur sans installation, il l'envoie sur l'entrée standard de PHP (mode éphémère) ; aucun démon ni port ouvert n'est nécessaire.
+
+## Console
+
+```bash
+dolifleet                  # ouvre la console sur un terminal
+dolifleet client-a-prod    # ouvre directement la fiche d'une instance
+dolifleet --plain          # état du parc en texte, sans ouvrir la console
+dolifleet console --json   # le même état en JSON, pour un script
+```
+
+Hors terminal (script, redirection), `dolifleet` seul affiche l'état du parc en texte au lieu d'ouvrir la console. Rien n'est contacté pour cet affichage : il vient des données locales, `dolifleet status all` les rafraîchit.
+
+### L'écran
+
+Chaque écran a cinq zones, toujours au même endroit :
+
+1. le fil d'Ariane et les compteurs, avec l'âge des données ;
+2. la commande équivalente, par exemple `$ dolifleet status all` : la console lance exactement cette commande (avec `--json`), et `y` la copie dans le presse-papiers du terminal (séquence OSC 52 : xterm, kitty, iTerm2, tmux avec `set-clipboard`) ;
+3. le contenu ;
+4. le bandeau des opérations en cours, quand il y en a ;
+5. la barre des touches utiles dans cet écran.
+
+Le parc est trié par gravité : ce qui demande attention est en haut, et la colonne "à regarder" donne le problème le plus grave avec la touche qui le règle. L'écran s'ouvre sur le dernier état connu, puis chaque instance est recontrôlée en arrière-plan, au plus `parallel` à la fois. Une instance injoignable reste dans la liste, avec la raison. Une instance de production porte l'étiquette `PROD`, et le cadre de l'écran devient double (rouge en couleur) dès qu'une instance de production est concernée.
+
+### Les touches
+
+| Touche | Effet |
+|--------|-------|
+| `?` | aide de l'écran : ses touches, ses colonnes, les signes, sa commande |
+| `:` | palette : n'importe quelle commande de Dolicli, avec complétion (`Tab`) |
+| `/` | filtre sur les noms, serveurs et étiquettes ; `tag:x` et `server:x` sélectionnent exactement |
+| `espace`, `*` | cocher une instance, cocher tout ce que montre le filtre |
+| `Entrée` | fiche de l'instance, détail d'une ligne |
+| `m`, `b`, `u` | maintenance, sauvegarde, montée de version (sur les instances cochées, sinon sur la ligne courante) |
+| `g`, `s` | grouper par étiquette ou par serveur, changer le tri |
+| `r` | recontrôler ce qui est affiché |
+| `a` | ajouter un serveur |
+| `!` | coulisses : chaque commande lancée par la console, sa durée, son résultat, sa sortie |
+| `j` | opérations en cours ou terminées |
+| `Échap`, `q` | revenir, quitter |
+
+Les touches ne changent pas avec la langue. Les signes ne dépendent jamais de la couleur seule : `!!` critique, `!` attention, `?` inconnu ou injoignable, `..` en cours.
+
+### La fiche d'une instance
+
+Sept onglets numérotés, chacun égal à une commande : `1` Résumé (`dolifleet status <instance>`), `2` Modules (`dolifleet exec <instance> -- module list --external`, `x` pour tous les modules), `3` Utilisateurs (`user list`), `4` Cron (`cron list`), `5` Sauvegardes (`backup list`), `6` Journal (`dolifleet log <instance>`), `7` Supervision (`monitor show`). Les listes se chargent en arrière-plan à la première ouverture de l'onglet ; `r` les recharge.
+
+### Les écritures
+
+Une écriture ne part jamais sur une seule touche. Elle ouvre d'abord un aperçu : la commande exacte, la simulation de Dolicli (`--dry-run`) ou le plan d'une montée de version, les instances touchées dans l'ordre (la première sert de témoin), et ce qui peut être annulé. Puis la confirmation :
+
+- hors production, `Entrée` ;
+- une instance de production : retaper son nom ;
+- un lot qui contient de la production : taper le nombre d'instances de production touchées ;
+- une commande destructive (palette) : une seule instance, et son nom.
+
+La console transmet la réponse au pilote (`--confirm`), qui la vérifie à son tour avec les mêmes règles que pour une réponse tapée. Le journal enregistre `via: console`.
+
+Les écritures sont lancées détachées (`~/.local/share/dolifleet/console-tasks/`) : fermer la console ne les interrompt pas, et la console suivante les retrouve. Une sauvegarde est suivie par `dolifleet jobs`, une montée de version par `dolifleet upgrade status`. Quand une montée de version arrive à une étape manuelle, l'opération attend : faites l'étape sur le serveur, puis `d` dans l'écran des opérations la déclare faite (`dolifleet upgrade resume <instance> --done=<étape>`).
+
+En quittant, la console affiche dans le terminal les écritures de la session, sous forme de commandes à rejouer ou à coller dans un ticket.
+
+### Les erreurs
+
+Une erreur a toujours la même forme : ce qui s'est passé, pourquoi, quoi faire (lignes exactes, `c` les copie), puis les dernières lignes écrites par le serveur. `Entrée` revérifie (`dolifleet check <instance>`). Exemple : un sudo refusé donne le fichier `/etc/sudoers.d/dolifleet` exact à créer, avec le compte SSH, le compte web et le PHP de l'instance.
+
+### Ajouter un serveur
+
+`a` ouvre l'assistant dans la console : alias SSH, clé d'hôte (empreinte affichée, `o` pour l'accepter après l'avoir vérifiée), recherche des Dolibarr (`s` pour chercher avec sudo, `d` pour un autre dossier), choix des instances (garder ou ignorer, renommer avec `n`, production avec `p`), puis `dolifleet add` avec `--instances`, `--rename` et `--prod`. La fiche de la première instance ajoutée s'ouvre ensuite.
+
+### Langue et réglages
+
+La console est multilingue (français et anglais fournis). La langue se choisit, de la plus prioritaire à la moins prioritaire : option `--lang=fr`, variable `DOLIFLEET_LANG`, clé `lang:` de `~/.config/dolifleet/settings.yaml`, langue du système, puis l'anglais. Dans la console, `: lang en` change la langue, `: lang en --save` l'enregistre. `dolifleet console --lang=list` donne les langues disponibles et leur taux de traduction. Les touches, les commandes, les sorties JSON et les journaux ne sont jamais traduits.
+
+`console: false` dans `settings.yaml` fait afficher l'état du parc en texte par `dolifleet` seul ; `dolifleet console` ouvre alors la console.
+
+### Terminal
+
+80 colonnes sur 24 lignes au minimum. La console fonctionne par SSH depuis un bastion, dans tmux ou screen, en 16 couleurs ; `NO_COLOR` ou `--no-color` retirent les couleurs, et les cadres passent en ASCII hors UTF-8. La souris n'est pas utilisée, ce qui laisse la sélection de texte du terminal disponible. `Ctrl-C` quitte sans arrêter les opérations détachées, et le terminal est rendu dans son état d'origine, même après une erreur.
 
 ## Transport
 
@@ -65,6 +144,7 @@ servers:
 
 | Commande | Rôle |
 |----------|------|
+| `dolifleet [<instance>] [--plain] [--lang=<code>]` | Console (voir plus haut) ; état du parc en texte hors terminal ou avec `--plain` |
 | `dolifleet add <serveur> --root=<htdocs>` | Assistant : clé d'hôte, découverte, choix des instances, étiquettes ; écrit l'inventaire (voir ci-dessous) |
 | `dolifleet hostkey <serveur> [--accept]` | Clé d'hôte SSH : connue ou non, empreintes, ajout à `known_hosts` ; code 3 si le serveur ne répond pas |
 | `dolifleet config validate` | Valide l'inventaire et ses inclusions |
@@ -74,7 +154,7 @@ servers:
 | `dolifleet status <cible> [--refresh]` | Tableau d'état : fichiers d'état récents, sinon contrôles rapides collectés à l'instant ; affiche toujours l'âge des données |
 | `dolifleet exec <cible> -- <commande dolicli>` | Exécute une commande de Dolicli avec les garde-fous du manifeste |
 | `dolifleet maintenance on\|off <cible>` | Mode maintenance (login `maintenance_login`) |
-| `dolifleet backup <cible> --database [--documents]` | Sauvegarde, en opération détachée |
+| `dolifleet backup <cible> --database [--documents] [--dry-run]` | Sauvegarde, en opération détachée ; `--dry-run` décrit les fichiers sans rien lancer |
 | `dolifleet sessions <cible>` | Sessions, avec les logins |
 | `dolifleet jobs [<cible>] [--id=ID --wait]` | Opérations détachées en cours ou terminées ; rattachement après une coupure |
 | `dolifleet upgrade plan\|run\|resume\|status <instance>` | Montée de version |
@@ -99,6 +179,7 @@ Options de `dolifleet add` pour un script ou une interface :
 - `--dry-run` partout, y compris sur un lot : Dolicli décrit les actions sans les faire.
 - Le manifeste de Dolicli classe chaque commande (`read`, `write`, `destructive`) : les lectures partent en parallèle, les écritures en série, en commençant par une seule instance témoin, et s'arrêtent à la première erreur (`--continue-on-error` pour l'inverse). Une commande `destructive` (anonymisation, étapes de montée de version) est refusée sur plusieurs instances.
 - Instance protégée (étiquettes de `protected_tags`) : il faut retaper son nom ; pour un lot, la liste des instances est affichée et il faut retaper la cible exacte. `--yes` est réservé aux scripts et journalisé.
+- `--confirm=<réponse>` donne la réponse à la question de confirmation sans terminal, pour une interface qui l'a posée elle-même (console, tableau de bord) : elle est vérifiée comme une réponse tapée (`yes` pour une instance non protégée, son nom pour une instance protégée, la cible exacte pour un lot). La variable `DOLIFLEET_FRONTEND` (`console`, `dashboard`) est enregistrée dans le journal (`via`).
 - Une instance verrouillée par une autre opération refuse l'écriture (code 5 de Dolicli).
 
 ## Journal et données locales
@@ -119,6 +200,8 @@ dolifleet upgrade status client-a-preprod
 Le plan, affiché et enregistré sur le poste et sur le serveur (`documents/dolicli/upgrade/plan.json`), signale avant toute exécution un PHP CLI compatible manquant, les modules externes dont la compatibilité est inconnue (désactivés pendant la montée), un espace disque insuffisant et les étapes sans retour arrière autre que la restauration de la sauvegarde.
 
 L'exécution enchaîne : bail sur le serveur (un autre administrateur ne peut pas intervenir entre deux étapes), maintenance, suspension des travaux planifiés (action manuelle confirmée), désactivation des modules externes, sauvegarde de la base et de `documents/`, archive téléchargée par le poste et envoyée au serveur avec sa signature officielle, nouveaux fichiers préparés et vérifiés, bascule des dossiers, migrations avec le PHP CLI de la cible (opération détachée), finalisation, bascule du PHP web si nécessaire (pause, puis `resume`), vérifications, réouverture. `--archive=` et `--signature=` utilisent des fichiers locaux au lieu de les télécharger.
+
+Sans terminal, une étape manuelle met la montée de version en pause (état `paused`). Une fois l'étape faite sur le serveur, `dolifleet upgrade resume <instance> --done=<étape>` la déclare faite et reprend ; `--confirm=<instance>` remplace la question du nom. `--yes` considère au contraire toutes les étapes manuelles comme faites.
 
 Après un échec, l'exécution s'arrête, le mode maintenance reste actif, `install.lock` est remis en place si possible, et le pilote affiche l'emplacement des sauvegardes et la procédure de retour (`dolifleet exec <instance> -- upgrade restore-files`, restauration de la base décidée par l'administrateur). Chaque étape revérifie son état avant de s'exécuter : `resume` reprend là où le plan s'était arrêté.
 

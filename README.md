@@ -38,6 +38,8 @@ Outside a terminal the output is a JSON envelope (`schema/envelope.schema.json`)
 ## Use from a workstation
 
 ```
+dolifleet                                  # full-screen console (state of the fleet as text without a terminal)
+dolifleet client-a-prod                    # console opened on the card of an instance
 dolifleet add web-client-a                 # SSH alias of ~/.ssh/config
 dolifleet check all
 dolifleet status tag:prod
@@ -45,6 +47,18 @@ dolifleet exec tag:preprod -- user list
 dolifleet upgrade plan client-a-preprod --to=20.0.4
 dolifleet serve
 ```
+
+### Console
+
+`dolifleet` alone opens a full-screen console: the fleet sorted worst first, a card per instance
+with seven tabs (summary, modules, users, cron, backups, journal, monitoring), writes always
+through a preview (dry run of dolicli or upgrade plan) and a confirmation (the name of a
+production instance, the number of production instances of a batch), long operations followed
+in a band, a palette for any dolicli command (`:`), and the backstage (`!`) listing every command
+it ran. Each screen shows the exact dolifleet command that produces it, and the console runs
+exactly that command with `--json`; writes run detached and survive the console. French and
+English: `--lang`, `DOLIFLEET_LANG`, `lang:` in `~/.config/dolifleet/settings.yaml`, or the locale.
+`dolifleet --plain` (or no terminal) prints the state of the fleet from the local data.
 
 ### Adding a server
 
