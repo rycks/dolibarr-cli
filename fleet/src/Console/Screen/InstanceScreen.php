@@ -155,6 +155,10 @@ final class InstanceScreen extends Screen implements TargetAware
             return true;
         }
         switch ($key) {
+            case 'l':
+                $this->tab = 6;
+
+                return true;
             case 'tab':
                 $this->tab = $this->tab % 7 + 1;
 

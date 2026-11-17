@@ -528,3 +528,11 @@ it('filters and sorts every list with the same keys: tabs of the card and backst
     expect($backstage)->toContain('dolifleet exec dev1 -- user list')
         ->and($backstage)->not->toContain('dolifleet status dev1');
 });
+
+it('opens the journal of an instance with l, from the fleet and from the card', function (): void {
+    [$app] = consoleApp();
+    press($app, ['l']);
+    expect(screenOf($app)[1])->toBe(' $ dolifleet log dev1');
+    press($app, ['1', 'l']);
+    expect(screenOf($app)[1])->toBe(' $ dolifleet log dev1');
+});

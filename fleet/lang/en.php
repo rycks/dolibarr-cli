@@ -54,6 +54,7 @@ return [
     'key.scroll' => 'scroll',
     'key.choose' => 'choose',
     'key.tabs' => 'tabs',
+    'key.journal' => 'journal',
     'key.error' => 'error',
     'key.step_done' => 'step done, resume',
     'key.leave_running' => 'leave it running',

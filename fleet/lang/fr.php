@@ -54,6 +54,7 @@ return [
     'key.scroll' => 'défiler',
     'key.choose' => 'choisir',
     'key.tabs' => 'onglets',
+    'key.journal' => 'journal',
     'key.error' => 'erreur',
     'key.step_done' => 'étape faite, reprendre',
     'key.leave_running' => 'laisser tourner',

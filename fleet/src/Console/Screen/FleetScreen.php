@@ -92,6 +92,7 @@ final class FleetScreen extends Screen implements TargetAware
             ['m', $app->t->t('fix.m').$suffix],
             ['b', $app->t->t('fix.b').$suffix],
             ['u', $app->t->t('fix.u')],
+            ['l', $app->t->t('key.journal')],
             ['/', $app->t->t('key.filter')],
             ['g', $app->t->t('key.group')],
             ['s', $app->t->t('key.sort')],
@@ -196,6 +197,13 @@ final class FleetScreen extends Screen implements TargetAware
                 return true;
             case 'r':
                 $app->refresh(array_map(static fn (Row $r): string => $r->id(), $this->visible($app)));
+
+                return true;
+            case 'l':
+                $row = $this->current($app);
+                if (null !== $row) {
+                    $app->push(new InstanceScreen($row->id(), 6));
+                }
 
                 return true;
             case 'a':
