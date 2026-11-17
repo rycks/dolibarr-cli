@@ -15,6 +15,14 @@ use User;
 abstract class Command extends CommandController
 {
     /**
+     * One line description shown by ./dolibarr help (empty: not listed).
+     */
+    public function summary(): string
+    {
+        return '';
+    }
+
+    /**
      * Report a failure: message on screen, reason in the Dolibarr log, exit code set.
      */
     protected function fail(string $message, int $code = ExitStatus::FAILURE): void

@@ -8,6 +8,11 @@ use App\Support\Command;
 
 class CronkeyController extends Command
 {
+    public function summary(): string
+    {
+        return 'Show or change the scheduled jobs security key';
+    }
+
     public function usage(): void
     {
         $this->info("Dolibarr Scheduled Jobs Security Key (CRON_KEY) Management

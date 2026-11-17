@@ -9,6 +9,11 @@ use User;
 
 class ListController extends Command
 {
+    public function summary(): string
+    {
+        return 'List users';
+    }
+
     public function usage(): void
     {
         $this->info('List Dolibarr users

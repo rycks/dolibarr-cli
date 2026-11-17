@@ -9,6 +9,11 @@ use App\Util\ModuleScanner;
 
 class ActivateController extends Command
 {
+    public function summary(): string
+    {
+        return 'Activate a module (or all of them)';
+    }
+
     public function usage(): void
     {
         $this->info('Activate a Dolibarr module

@@ -9,6 +9,11 @@ use User;
 
 class AddController extends Command
 {
+    public function summary(): string
+    {
+        return 'Create a user';
+    }
+
     public function usage(): void
     {
         $this->info('Add a new Dolibarr user

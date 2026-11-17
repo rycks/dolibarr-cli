@@ -9,6 +9,11 @@ use User;
 
 class PasswordController extends Command
 {
+    public function summary(): string
+    {
+        return 'Change a user password';
+    }
+
     public function usage(): void
     {
         $this->info('Change the password of a Dolibarr user

@@ -12,6 +12,11 @@ class DeactivateController extends Command
     /** Modules that are never deactivated by --all. */
     private const PROTECTED_MODULES = ['modUser', 'modSysLog'];
 
+    public function summary(): string
+    {
+        return 'Deactivate a module (or all of them)';
+    }
+
     public function usage(): void
     {
         $this->info('Deactivate a Dolibarr module

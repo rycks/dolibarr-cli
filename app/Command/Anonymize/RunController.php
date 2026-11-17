@@ -23,6 +23,11 @@ class RunController extends Command
 
     private ?Maintenance $maintenance = null;
 
+    public function summary(): string
+    {
+        return 'Anonymize all personal data (copies of databases only)';
+    }
+
     public function usage(): void
     {
         $this->info('Anonymize all personal data in the Dolibarr database

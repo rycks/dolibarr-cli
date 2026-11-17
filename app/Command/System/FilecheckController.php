@@ -16,6 +16,11 @@ class FilecheckController extends Command
 
     private const EXIT_NO_XML = 3;
 
+    public function summary(): string
+    {
+        return 'Check deployed files against the official signature';
+    }
+
     public function usage(): void
     {
         $this->info('Dolibarr deployment integrity check

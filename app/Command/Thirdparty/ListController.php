@@ -15,6 +15,11 @@ class ListController extends Command
         'supplier' => 't.fournisseur = 1',
     ];
 
+    public function summary(): string
+    {
+        return 'List third parties';
+    }
+
     public function usage(): void
     {
         $this->info('List Dolibarr third parties

@@ -17,7 +17,6 @@ Dolibarr tools from command line'
 
     'app_path' => [
         __DIR__.'/../app/Command',
-        '@minicli/command-help',
     ],
 
     'theme' => '',

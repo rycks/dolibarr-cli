@@ -9,6 +9,11 @@ use User;
 
 class EditController extends Command
 {
+    public function summary(): string
+    {
+        return 'Lock or unlock a user account';
+    }
+
     public function usage(): void
     {
         $this->info('Lock or unlock a Dolibarr user account

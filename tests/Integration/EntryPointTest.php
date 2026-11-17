@@ -37,3 +37,15 @@ it('exits with the code set by the command', function (): void {
 
     expect($result['code'])->toBe(3);
 });
+
+it('shows the general help, built from the commands, without argument', function (): void {
+    $result = dolicli([]);
+
+    expect($result['code'])->toBe(0)
+        ->and($result['out'])->toContain('Dolibarr tools from command line')
+        ->and($result['out'])->toContain('./dolibarr system upgrade')
+        ->and($result['out'])->toContain('- Check deployed files against the official signature')
+        ->and($result['out'])->toContain('./dolibarr backup ')
+        ->and($result['out'])->toContain('entity=N')
+        ->and(dolicli(['help'])['out'])->toBe($result['out']);
+});

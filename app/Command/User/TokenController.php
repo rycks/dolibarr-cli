@@ -9,6 +9,11 @@ use User;
 
 class TokenController extends Command
 {
+    public function summary(): string
+    {
+        return 'Generate a REST API key';
+    }
+
     public function usage(): void
     {
         $this->info('Generate the REST API key of a Dolibarr user

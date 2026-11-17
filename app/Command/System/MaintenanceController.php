@@ -10,6 +10,11 @@ use User;
 
 class MaintenanceController extends Command
 {
+    public function summary(): string
+    {
+        return 'Enable, disable or show the maintenance mode';
+    }
+
     public function usage(): void
     {
         $this->info('Dolibarr Maintenance Mode Management

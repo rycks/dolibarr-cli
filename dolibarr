@@ -57,6 +57,11 @@ use Minicli\Exception\CommandNotFoundException;
 
 $app = new App();
 
+// Without a command, show the general help.
+if (count($argv) < 2) {
+    $argv[] = 'help';
+}
+
 try {
     $app->runCommand($argv);
 } catch (CommandNotFoundException $notFoundException) {

@@ -9,6 +9,11 @@ use App\Util\DatabaseBackup;
 
 class DefaultController extends Command
 {
+    public function summary(): string
+    {
+        return 'Back up the database, documents and external modules';
+    }
+
     public function usage(): void
     {
         $this->info('Dolibarr backups

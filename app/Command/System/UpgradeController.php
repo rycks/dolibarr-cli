@@ -43,6 +43,11 @@ class UpgradeController extends Command
 
     private Maintenance $maintenance;
 
+    public function summary(): string
+    {
+        return 'Upgrade Dolibarr files and/or migrate the database';
+    }
+
     public function usage(): void
     {
         $this->info('Dolibarr Upgrade Manager - Update files and migrate database

@@ -4,52 +4,8 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "7d4ed6281a031b3e583ac7e60136a7c4",
+    "content-hash": "2113ec4c32c7407899f5f246824fb93e",
     "packages": [
-        {
-            "name": "minicli/command-help",
-            "version": "1.0.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/minicli/command-help.git",
-                "reference": "d87601fff38467d563c129acb50e7c8c286c0fdc"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/minicli/command-help/zipball/d87601fff38467d563c129acb50e7c8c286c0fdc",
-                "reference": "d87601fff38467d563c129acb50e7c8c286c0fdc",
-                "shasum": ""
-            },
-            "require": {
-                "minicli/minicli": "^4.0"
-            },
-            "require-dev": {
-                "laravel/pint": "^1.10",
-                "pestphp/pest": "^2.6"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Command\\": "Command/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "description": "A help command for Minicli",
-            "homepage": "https://github.com/minicli/command-help",
-            "keywords": [
-                "cli",
-                "command-line",
-                "minicli"
-            ],
-            "support": {
-                "issues": "https://github.com/minicli/command-help/issues",
-                "source": "https://github.com/minicli/command-help/tree/1.0.1"
-            },
-            "time": "2023-06-07T13:59:44+00:00"
-        },
         {
             "name": "minicli/minicli",
             "version": "4.2.1",

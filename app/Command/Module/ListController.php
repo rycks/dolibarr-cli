@@ -9,6 +9,11 @@ use App\Util\ModuleScanner;
 
 class ListController extends Command
 {
+    public function summary(): string
+    {
+        return 'List installed modules and their state';
+    }
+
     public function usage(): void
     {
         $this->info('List installed Dolibarr modules

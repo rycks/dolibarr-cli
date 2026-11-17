@@ -12,6 +12,11 @@ class ShowController extends Command
 {
     private const RULE = "===========================================================\n";
 
+    public function summary(): string
+    {
+        return 'Display user details';
+    }
+
     public function usage(): void
     {
         $this->info('Display detailed information about a Dolibarr user

@@ -9,6 +9,11 @@ use Societe;
 
 class AccountingnumberController extends Command
 {
+    public function summary(): string
+    {
+        return 'Recompute customer accounting codes';
+    }
+
     public function usage(): void
     {
         $this->info('Recompute the customer accounting code of third parties (customers and prospects)

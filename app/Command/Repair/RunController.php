@@ -50,6 +50,11 @@ class RunController extends Command
         return implode("\n", $lines);
     }
 
+    public function summary(): string
+    {
+        return 'Run a database repair action (install/repair.php)';
+    }
+
     public function usage(): void
     {
         $this->info("Execute Dolibarr database repair and maintenance functions (install/repair.php)
