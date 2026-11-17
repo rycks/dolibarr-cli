@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
 
-class CronkeyController extends CommandController
+class CronkeyController extends Command
 {
     public function usage(): void
     {
@@ -22,194 +22,149 @@ Commands:
   show     - Display the current CRON_KEY value
   set      - Set CRON_KEY to the provided value (overwrites existing)
   generate - Generate a random CRON_KEY (32 hex chars) and store it
-  clear    - Delete the CRON_KEY constant
+  clear    - Delete the CRON_KEY constant: scheduled jobs can then no longer be
+             triggered by URL (Dolibarr refuses calls without a key)
 
 Parameters:
   key=XXXX - Value to use with 'set' (required)
 
-Examples:
-  ./dolibarr system cronkey show
-  ./dolibarr system cronkey set key=mySecret123
-  ./dolibarr system cronkey generate
-  ./dolibarr system cronkey clear
-
 Notes:
-  This key is the value of 'securitykey' used in the URL
-  public/cron/cron_run_jobs.php?securitykey=...
-  It is stored in llx_const as the CRON_KEY constant.");
+  This key is the 'securitykey' parameter of the URL that triggers scheduled jobs
+  over HTTP (".$this->cronUrl().'?securitykey=...).
+  It is stored in llx_const as the CRON_KEY constant of the current entity.
+  The command line script scripts/cron/cron_run_jobs.php does not need it.');
     }
 
     public function handle(): void
     {
-        global $db;
-
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        if (!$this->validateDolibarrEnvironment()) {
+        if ( ! $this->requireDolibarr()) {
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
+        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 
-        $args = $this->getArgs();
-        $subcommand = $args[3] ?? null;
-
-        match ($subcommand) {
+        match ($this->action()) {
             'show' => $this->handleShow(),
             'set' => $this->handleSet(),
             'generate' => $this->handleGenerate(),
             'clear' => $this->handleClear(),
-            default => $this->usage(),
+            default => $this->unknownAction(),
         };
     }
 
-    private function validateDolibarrEnvironment(): bool
+    private function unknownAction(): void
     {
-        global $db;
+        $this->usage();
+        $this->fail('Give an action: show, set, generate or clear.');
+    }
 
-        if (!isset($db) || !$db) {
-            $this->error("Dolibarr database connection not available!");
-            $this->info("Please ensure DOLPATH is set correctly and Dolibarr is accessible.");
-            return false;
+    /**
+     * URL of the HTTP cron trigger: cron_run_jobs_by_url.php in recent versions.
+     */
+    private function cronUrl(): string
+    {
+        $byUrl = 'public/cron/cron_run_jobs_by_url.php';
+        if (defined('DOL_DOCUMENT_ROOT') && ! is_file(DOL_DOCUMENT_ROOT.'/'.$byUrl) && is_file(DOL_DOCUMENT_ROOT.'/public/cron/cron_run_jobs.php')) {
+            return 'public/cron/cron_run_jobs.php';
         }
 
-        if (!defined('DOL_DOCUMENT_ROOT')) {
-            $this->error("DOL_DOCUMENT_ROOT is not defined!");
-            $this->info("Please ensure Dolibarr is properly initialized.");
-            return false;
-        }
-
-        return true;
+        return $byUrl;
     }
 
     private function getCurrentKey(): ?string
     {
         global $db, $conf;
 
-        $entity = (int) $conf->entity;
-        $sql = "SELECT value FROM " . MAIN_DB_PREFIX . "const"
-            . " WHERE name = " . "'" . $db->escape('CRON_KEY') . "'"
-            . " AND entity = " . $entity;
-
+        $sql = 'SELECT value FROM '.MAIN_DB_PREFIX."const WHERE name = 'CRON_KEY' AND entity = ".((int) $conf->entity);
         $resql = $db->query($sql);
-        if (!$resql) {
-            $this->error("Database query failed: " . $db->lasterror());
+        if ( ! $resql) {
+            $this->fail('Database query failed: '.$db->lasterror());
+
             return null;
         }
 
-        if ($db->num_rows($resql) === 0) {
-            $db->free($resql);
-            return '';
-        }
-
         $obj = $db->fetch_object($resql);
-        $db->free($resql);
+        $value = $obj ? (string) $obj->value : '';
 
-        $value = $obj->value ?? '';
-
-        // CRON_KEY is stored as plain 'chaine' so no decoding is required,
-        // but we keep dolDecrypt for safety on installs that may have encrypted it.
-        if (function_exists('dolDecrypt') && $value !== '') {
+        // Recent versions store this constant encrypted (dolibarr_set_const encrypts *_KEY names).
+        if ('' !== $value && function_exists('dolDecrypt')) {
             $decoded = dolDecrypt($value);
-            if (is_string($decoded) && $decoded !== '') {
+            if (is_string($decoded) && '' !== $decoded) {
                 $value = $decoded;
             }
         }
 
-        return (string) $value;
+        return $value;
     }
 
     private function handleShow(): void
     {
-        $this->info("Reading CRON_KEY (scheduled jobs security key)...\n");
-
         $value = $this->getCurrentKey();
-
-        if ($value === null) {
+        if (null === $value) {
             return;
         }
 
-        if ($value === '') {
-            $this->display("CRON_KEY is not set (empty).");
-            $this->info("No security key is required by Dolibarr to trigger cron jobs.");
+        if ('' === $value) {
+            $this->display('CRON_KEY is not set: scheduled jobs cannot be triggered by URL.');
+
             return;
         }
 
-        $this->success("CRON_KEY = " . $value);
+        $this->rawOutput($value."\n");
     }
 
     private function setKey(string $value, string $origin): void
     {
         global $db, $conf;
 
-        $result = dolibarr_set_const(
-            $db,
-            'CRON_KEY',
-            $value,
-            'chaine',
-            0,
-            'Set by dolicli system cronkey ' . $origin,
-            (int) $conf->entity
-        );
+        $result = dolibarr_set_const($db, 'CRON_KEY', $value, 'chaine', 0, 'Set by dolicli system cronkey '.$origin, (int) $conf->entity);
+        if ($result <= 0) {
+            $this->fail('Failed to update CRON_KEY: '.$db->lasterror());
 
-        if ($result > 0) {
-            $this->success("CRON_KEY updated successfully.");
-            $this->display("New value: " . $value);
-            $this->info("Used in URL: public/cron/cron_run_jobs.php?securitykey=" . urlencode($value));
-        } else {
-            $this->error("Failed to update CRON_KEY.");
-            $this->info("Please check database permissions and try again.");
+            return;
         }
+
+        $this->success('CRON_KEY updated. New value:');
+        $this->rawOutput($value."\n");
+        $this->info('URL: '.$this->cronUrl().'?securitykey='.urlencode($value));
+        $this->info('Update the scheduler (crontab...) that calls this URL.');
     }
 
     private function handleSet(): void
     {
-        $value = $this->getParam('key');
+        $value = $this->param('key');
+        if (null === $value || '' === $value) {
+            $this->fail('Missing required parameter: key=XXXX');
 
-        if ($value === null || $value === '') {
-            $this->error("Missing required parameter: key=XXXX");
-            $this->info("Example: ./dolibarr system cronkey set key=mySecret123");
             return;
         }
 
-        $this->info("Setting CRON_KEY to provided value...\n");
         $this->setKey($value, 'set');
     }
 
     private function handleGenerate(): void
     {
-        try {
-            $value = bin2hex(random_bytes(16));
-        } catch (\Throwable $e) {
-            $this->error("Unable to generate random key: " . $e->getMessage());
-            return;
-        }
-
-        $this->info("Generating a random CRON_KEY...\n");
-        $this->setKey($value, 'generate');
+        $this->setKey(bin2hex(random_bytes(16)), 'generate');
     }
 
     private function handleClear(): void
     {
         global $db, $conf;
 
-        $this->info("Clearing CRON_KEY...\n");
-
         $result = dolibarr_del_const($db, 'CRON_KEY', (int) $conf->entity);
+        if ($result < 0) {
+            $this->fail('Failed to remove CRON_KEY: '.$db->lasterror());
 
-        if ($result > 0) {
-            $this->success("CRON_KEY removed.");
-            $this->display("Dolibarr no longer requires a security key for cron jobs.");
-        } else {
-            $this->info("CRON_KEY was not set or already removed.");
+            return;
         }
-    }
 
-    public function required(): array
-    {
-        return [];
+        $this->success('CRON_KEY removed.');
+        $this->info('Scheduled jobs can no longer be triggered by URL until a new key is set.');
     }
 }

@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
-use Minicli\Command\CommandController;
-use App\Util\DolibarrHelper;
+use App\Support\Command;
+use App\Util\Maintenance;
+use User;
 
-class MaintenanceController extends CommandController
+class MaintenanceController extends Command
 {
     public function usage(): void
     {
-        $this->info("Dolibarr Maintenance Mode Management
+        $this->info('Dolibarr Maintenance Mode Management
 
 Usage:
   ./dolibarr system maintenance enable [login=username]
@@ -24,171 +25,101 @@ Commands:
   status  - Show current maintenance mode status
 
 Parameters:
-  login=username - Specify which user can login during maintenance
+  login=username - User allowed to log in during maintenance
                    (default: first super admin user found)
 
-Examples:
-  ./dolibarr system maintenance status
-  ./dolibarr system maintenance enable
-  ./dolibarr system maintenance enable login=myuser
-  ./dolibarr system maintenance disable
-
-WARNING: Enabling maintenance mode restricts login to a single user.
-Ensure the specified user exists and you have access to that account.
-Do NOT disconnect before disabling maintenance mode or you may be locked out!");
+Make sure the allowed user exists and that you can log in with it.
+The maintenance mode stays on until ./dolibarr system maintenance disable.');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-
-        // Check for help flag
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        // Validate Dolibarr environment
-        if (!$this->validateDolibarrEnvironment()) {
+        if ( ! $this->requireDolibarr()) {
             return;
         }
 
-        // Load required Dolibarr libraries
-        require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
-
-        // Get subcommand from arguments
-        $args = $this->getArgs();
-        $subcommand = $args[3] ?? null;
-
-        // Route to appropriate handler
-        match($subcommand) {
+        match ($this->action()) {
             'enable' => $this->handleEnable(),
             'disable' => $this->handleDisable(),
             'status' => $this->handleStatus(),
-            default => $this->usage()
+            default => $this->unknownAction(),
         };
     }
 
-    private function validateDolibarrEnvironment(): bool
+    private function unknownAction(): void
     {
-        global $db;
-
-        if (!isset($db) || !$db) {
-            $this->error("Dolibarr database connection not available!");
-            $this->info("Please ensure DOLPATH is set correctly and Dolibarr is accessible.");
-            return false;
-        }
-
-        if (!defined('DOL_DOCUMENT_ROOT')) {
-            $this->error("DOL_DOCUMENT_ROOT is not defined!");
-            $this->info("Please ensure Dolibarr is properly initialized.");
-            return false;
-        }
-
-        return true;
+        $this->usage();
+        $this->fail('Give an action: enable, disable or status.');
     }
 
     private function handleStatus(): void
     {
-        global $conf;
-
-        $this->info("Checking maintenance mode status...\n");
-
-        if (isset($conf->global->MAIN_ONLY_LOGIN_ALLOWED) &&
-            !empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED)) {
-            $allowedUser = $conf->global->MAIN_ONLY_LOGIN_ALLOWED;
-            $this->error("Maintenance mode: ENABLED");
-            $this->display("Only user '$allowedUser' can login");
+        $allowed = Maintenance::currentLogin();
+        if ('' !== $allowed) {
+            $this->error('Maintenance mode: ENABLED');
+            $this->display("Only user '{$allowed}' can login");
         } else {
-            $this->success("Maintenance mode: DISABLED");
-            $this->display("All users can login normally");
+            $this->success('Maintenance mode: DISABLED');
+            $this->display('All users can login normally');
         }
     }
 
     private function handleEnable(): void
     {
-        global $db, $conf;
+        global $db;
 
-        $this->info("Enabling maintenance mode...\n");
+        $current = Maintenance::currentLogin();
+        if ('' !== $current) {
+            $this->info("Maintenance mode is already enabled for '{$current}'.");
 
-        // Get login parameter or find first super admin
-        $allowedLogin = $this->getParam('login');
+            return;
+        }
 
-        if (!$allowedLogin) {
-            // Find first super admin user
-            $allowedLogin = DolibarrHelper::findFirstSuperAdmin();
-            if ($allowedLogin) {
-                $this->info("No user specified, using first super admin: $allowedLogin");
-            } else {
-                $this->error("No super admin user found in database!");
-                $this->info("Please specify a user with login=username parameter.");
+        $login = $this->param('login');
+        if (null !== $login) {
+            require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+            $u = new User($db);
+            if ($u->fetch(0, $login) <= 0) {
+                $this->fail("User '{$login}' does not exist: maintenance mode not enabled.");
+
                 return;
             }
         }
 
-        // Validate user exists
-        if (!$this->validateUserExists($allowedLogin)) {
-            $this->error("User '$allowedLogin' does not exist!");
-            $this->info("Cannot enable maintenance mode with non-existent user.");
-            $this->info("Please specify a valid user with login=username parameter.");
+        $maintenance = new Maintenance();
+        $allowed = $maintenance->enable('Set by dolicli system maintenance enable', $login);
+        if (null === $allowed) {
+            $this->fail($maintenance->lastError());
+
             return;
         }
 
-        // Set the maintenance mode constant
-        $result = dolibarr_set_const(
-            $db,
-            'MAIN_ONLY_LOGIN_ALLOWED',
-            $allowedLogin,
-            'chaine',
-            0,
-            'Set by dolicli system maintenance enable',
-            $conf->entity
-        );
-
-        // Display result
-        if ($result > 0) {
-            $this->success("Maintenance mode ENABLED");
-            $this->display("Only user '$allowedLogin' can now login to Dolibarr.");
-            $this->error("\nWARNING: Do not disconnect before disabling maintenance mode!");
-            $this->info("Use './dolibarr system maintenance disable' to restore normal access.");
-        } else {
-            $this->error("Failed to enable maintenance mode");
-            $this->info("Please check database permissions and try again.");
-        }
+        $this->success('Maintenance mode ENABLED');
+        $this->display("Only user '{$allowed}' can now login to Dolibarr.");
+        $this->info("Use './dolibarr system maintenance disable' to restore normal access.");
     }
 
     private function handleDisable(): void
     {
-        global $db, $conf;
+        if ('' === Maintenance::currentLogin()) {
+            $this->info('Maintenance mode was not active.');
 
-        $this->info("Disabling maintenance mode...\n");
-
-        // Delete the maintenance mode constant
-        $result = dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity);
-
-        // Display result
-        if ($result > 0) {
-            $this->success("Maintenance mode DISABLED");
-            $this->display("All users can now login to Dolibarr normally.");
-        } else {
-            $this->info("Maintenance mode was not active or already disabled.");
+            return;
         }
-    }
 
-    private function validateUserExists(string $login): bool
-    {
-        global $db;
+        if ( ! Maintenance::forceDisable()) {
+            $this->fail('Failed to disable maintenance mode: check the database.');
 
-        require_once DOL_DOCUMENT_ROOT . "/user/class/user.class.php";
+            return;
+        }
 
-        $user = new \User($db);
-        $result = $user->fetch('', $login);
-
-        return ($result > 0);
-    }
-
-    public function required(): array
-    {
-        return [];
+        $this->success('Maintenance mode DISABLED');
+        $this->display('All users can now login to Dolibarr normally.');
     }
 }
