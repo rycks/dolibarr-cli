@@ -1,12 +1,13 @@
 {
-  "name": "dolibarr/dolicli",
-  "description": "Dolibarr CLI",
+  "name": "rycks/dolibarr-cli",
+  "description": "Dolibarr administration from the command line",
   "license": "GPLv3",
-  "homepage": "https://github.com/dolibarr/dolibarr",
+  "homepage": "https://github.com/rycks/dolibarr-cli",
   "keywords": [
     "cli",
     "command-line",
-    "template"
+    "dolibarr",
+    "erp"
   ],
   "autoload": {
     "psr-4": {
@@ -18,7 +19,8 @@
   ],
   "require": {
     "php": ">=8.2",
-    "minicli/minicli": "^4.2"
+    "minicli/minicli": "^4.2",
+    "symfony/polyfill-mbstring": "^1.31"
   },
   "require-dev": {
     "pestphp/pest": "^3.8",
@@ -33,6 +35,7 @@
       "pint"
     ],
     "test:lint": [
+      "@php -l dolibarr",
       "pint --test"
     ],
     "test:unit": [

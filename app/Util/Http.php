@@ -34,15 +34,15 @@ final class Http
         ]);
 
         $body = @file_get_contents($url, false, $context);
-        $headers = function_exists('http_get_last_response_headers')
-            ? (http_get_last_response_headers() ?? [])
-            : ($http_response_header ?? []);
-
         if (false === $body) {
             $error = error_get_last();
+            self::failWith("GET {$url} failed: ".($error['message'] ?? 'network error'));
 
-            return self::failWith("GET {$url} failed: ".($error['message'] ?? 'network error'));
+            return null;
         }
+        $headers = function_exists('http_get_last_response_headers')
+            ? (http_get_last_response_headers() ?? [])
+            : $http_response_header;
 
         $status = 0;
         foreach ($headers as $header) {
@@ -51,7 +51,9 @@ final class Http
             }
         }
         if ($status < 200 || $status >= 300) {
-            return self::failWith("GET {$url} returned HTTP {$status}");
+            self::failWith("GET {$url} returned HTTP {$status}");
+
+            return null;
         }
 
         return $body;
@@ -96,11 +98,9 @@ final class Http
         return true;
     }
 
-    private static function failWith(string $message): ?string
+    private static function failWith(string $message): void
     {
         self::$lastError = $message;
         DolibarrHelper::log('http: '.$message, LOG_ERR);
-
-        return null;
     }
 }

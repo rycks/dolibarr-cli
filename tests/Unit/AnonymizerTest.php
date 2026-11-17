@@ -12,4 +12,3 @@ it('builds ASCII logins and emails from accented fake names', function (): void 
     }
     expect(Anonymizer::ascii('Hélène.Lefèvre'))->toBe('helene.lefevre');
 });
-

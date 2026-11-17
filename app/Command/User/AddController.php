@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use User;
 
@@ -80,7 +81,7 @@ Examples:
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
         $newuser = new User($db);
         $exists = $newuser->fetch(0, $login);
         if ($exists < 0) {

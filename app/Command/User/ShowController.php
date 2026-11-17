@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use User;
 use UserGroup;
@@ -53,8 +54,8 @@ Options:
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
-        require_once DOL_DOCUMENT_ROOT.'/user/class/usergroup.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
+        DolibarrHelper::requireCore('user/class/usergroup.class.php');
         $u = new User($db);
         $result = $u->fetch(0, $login);
         if ($result <= 0) {
@@ -92,7 +93,6 @@ Options:
 
         $this->section('AUTHENTICATION', [
             'API key' => empty($u->api_key) ? 'Not set' : 'Set',
-            'Auth mode' => $u->auth_mode ?: 'dolibarr',
         ]);
 
         $this->section('ACCOUNT DATES', array_filter([
@@ -126,7 +126,7 @@ Options:
         $groupNames = is_array($groups) ? array_map(static fn ($g): string => (string) $g->name, $groups) : [];
 
         $this->rawOutput("RIGHTS & GROUPS:\n");
-        $this->rawOutput($this->line('Permissions', $this->countRights($u->rights ?? null).' permission(s)'));
+        $this->rawOutput($this->line('Permissions', $this->countRights($u->rights).' permission(s)'));
         if ([] === $groupNames) {
             $this->rawOutput($this->line('Groups', 'No groups'));
         } else {

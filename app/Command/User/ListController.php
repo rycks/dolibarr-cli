@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use User;
 
@@ -39,7 +40,7 @@ admin (no, admin, superadmin).');
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
         $users = new User($db);
         $res = $users->fetchAll('ASC', 't.login');
         if ($res < 0) {

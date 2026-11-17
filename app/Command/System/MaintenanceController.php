@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use App\Util\Maintenance;
 use User;
@@ -88,7 +89,7 @@ The maintenance mode stays on until ./dolibarr system maintenance disable.');
 
         $login = $this->param('login');
         if (null !== $login) {
-            require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+            DolibarrHelper::requireCore('user/class/user.class.php');
             $u = new User($db);
             if ($u->fetch(0, $login) <= 0) {
                 $this->fail("User '{$login}' does not exist: maintenance mode not enabled.");

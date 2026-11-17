@@ -1,0 +1,17 @@
+includes:
+	- .phpstan.dist.neon
+parameters:
+	# Copy to .phpstan.local.neon (not versioned). The paths below are the
+	# shared ones of the dev machine; DOLIBARR_VERSION (default 18) and USER
+	# are interpolated by PHPStan.
+	tmpDir: /tmp/%env.USER%/dolicli/phpstan
+	# Fixes the wrong PHPDoc of the Dolibarr core
+	stubFiles:
+		- /home/groups/devs/code/stubs/dolibarr-stubs-all/phpstan/dolibarr-core.stub
+	scanDirectories:
+		- /home/groups/devs/code/stubs/dolibarr-stubs-all/dolibarr-%env.DOLIBARR_VERSION%/
+	excludePaths:
+		analyse:
+			- /home/groups/devs/code/stubs/dolibarr-stubs-all/dolibarr-%env.DOLIBARR_VERSION%/
+	bootstrapFiles:
+		- .phpstan-bootstrap.php

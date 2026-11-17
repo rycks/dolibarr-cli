@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use User;
 
@@ -53,7 +54,7 @@ The key is displayed once, when it is generated: it cannot be displayed again.')
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
         $target = new User($db);
         $result = $target->fetch(0, $login);
         if ($result <= 0) {

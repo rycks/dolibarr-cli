@@ -1,1 +1,8 @@
-/art                    export-ignore
+/tests              export-ignore
+/docs               export-ignore
+/doc                export-ignore
+/.github            export-ignore
+/.phpstan*          export-ignore
+/phpunit.xml        export-ignore
+/pint.json          export-ignore
+/Makefile           export-ignore

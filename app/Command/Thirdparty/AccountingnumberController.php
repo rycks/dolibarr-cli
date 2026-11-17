@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\Thirdparty;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use Societe;
 
@@ -54,7 +55,7 @@ The command stops at the first error (exit code 1).');
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
+        DolibarrHelper::requireCore('societe/class/societe.class.php');
 
         $sql = 'SELECT t.rowid FROM '.MAIN_DB_PREFIX.'societe as t';
         // client: 0 = none, 1 = customer, 2 = prospect, 3 = customer and prospect

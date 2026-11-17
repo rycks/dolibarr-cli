@@ -17,3 +17,4 @@ todo*.md
 TODO*.md
 *.log
 .env
+/.phpstan.local.neon

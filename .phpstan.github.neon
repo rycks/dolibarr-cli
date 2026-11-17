@@ -1,0 +1,15 @@
+includes:
+	- .phpstan.dist.neon
+parameters:
+	# GitHub Actions: the Dolibarr sources come from the SQLite test Dolibarr
+	# installed by composer (dev dependency), no shared stubs on the runner.
+	scanDirectories:
+		- vendor/cap-rel/dolibarr-integration-sqlite/htdocs/
+	excludePaths:
+		analyse:
+			- vendor/cap-rel/dolibarr-integration-sqlite/htdocs/
+		analyseAndScan:
+			# Declares a json_encode() fallback with one parameter, which would shadow PHP's
+			- vendor/cap-rel/dolibarr-integration-sqlite/htdocs/core/lib/json.lib.php
+	bootstrapFiles:
+		- .phpstan-bootstrap.php

@@ -57,7 +57,7 @@ final class FileSignature
      */
     public static function extraFiles(SimpleXMLElement $root, string $basePath, array $inSignature): array
     {
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+        DolibarrHelper::requireCore('core/lib/files.lib.php');
 
         $basePath = rtrim($basePath, '/');
         $includecustom = (int) ($root['includecustom'] ?? 0);
@@ -66,7 +66,7 @@ final class FileSignature
 
         $known = array_flip($inSignature);
         $added = [];
-        foreach (dol_dir_list($basePath, 'files', 1, $regextoinclude, $regextoexclude) as $file) {
+        foreach (dol_dir_list($basePath, 'files', 1, $regextoinclude, [$regextoexclude]) as $file) {
             $relative = mb_substr($file['fullname'], mb_strlen($basePath));
             if ( ! isset($known[$relative])) {
                 $md5 = md5_file($file['fullname']);

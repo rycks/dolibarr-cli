@@ -35,7 +35,7 @@ final class Maintenance
     {
         global $db, $conf;
 
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+        DolibarrHelper::requireCore('core/lib/admin.lib.php');
 
         $current = self::currentLogin();
         if ('' !== $current) {
@@ -44,11 +44,15 @@ final class Maintenance
 
         $login ??= DolibarrHelper::findFirstSuperAdmin();
         if (null === $login || '' === $login) {
-            return $this->failWith('No active super admin user found: cannot enable maintenance mode.');
+            $this->failWith('No active super admin user found: cannot enable maintenance mode.');
+
+            return null;
         }
 
         if (dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $login, 'chaine', 0, $note, $conf->entity) <= 0) {
-            return $this->failWith('Cannot enable maintenance mode: '.$db->lasterror());
+            $this->failWith('Cannot enable maintenance mode: '.$db->lasterror());
+
+            return null;
         }
         $conf->global->MAIN_ONLY_LOGIN_ALLOWED = $login;
         $this->enabledByUs = true;
@@ -76,7 +80,7 @@ final class Maintenance
     {
         global $db, $conf;
 
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+        DolibarrHelper::requireCore('core/lib/admin.lib.php');
 
         $result = dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity);
         unset($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
@@ -94,11 +98,9 @@ final class Maintenance
         return $this->enabledByUs;
     }
 
-    private function failWith(string $message): ?string
+    private function failWith(string $message): void
     {
         $this->lastError = $message;
         DolibarrHelper::log('maintenance: '.$message, LOG_ERR);
-
-        return null;
     }
 }

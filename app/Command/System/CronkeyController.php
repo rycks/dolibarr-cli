@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\System;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 
 class CronkeyController extends Command
@@ -52,7 +53,7 @@ Notes:
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+        DolibarrHelper::requireCore('core/lib/admin.lib.php');
 
         match ($this->action()) {
             'show' => $this->handleShow(),

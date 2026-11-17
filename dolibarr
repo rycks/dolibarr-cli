@@ -36,7 +36,7 @@ foreach ($argv as $arg) {
 
 // Include Dolibarr environment
 $path = rtrim((string) (getenv('DOLPATH') ?: './htdocs'), '/');
-if (!is_file($path . '/master.inc.php')) {
+if (!is_file($path . '/master.inc.php') || false === ($dolibarrRoot = realpath($path))) {
     fwrite(STDERR, "Dolibarr not found in '" . $path . "': put the sources in ./htdocs or set the DOLPATH environment variable.\n");
     exit(1);
 }
@@ -44,18 +44,26 @@ if (!is_file($path . '/master.inc.php')) {
 // master.inc.php prints HTML on fatal errors (database unreachable...) and may exit:
 // strip the tags of anything it prints, then stop buffering.
 ob_start(static fn (string $buffer): string => strip_tags($buffer));
-chdir($path);
-require_once './master.inc.php';
+chdir($dolibarrRoot);
+require_once $dolibarrRoot . '/master.inc.php';
 ob_end_flush();
 
 require __DIR__ . '/vendor/autoload.php';
 
+use App\Support\CommandRegistry;
 use App\Support\ExitStatus;
 use App\Util\DolibarrHelper;
 use Minicli\App;
 use Minicli\Exception\CommandNotFoundException;
 
-$app = new App();
+// Minicli finds config files and commands with glob(), which does not work inside a phar:
+// give it the configuration and a registry based on scandir().
+$app = new App(array_merge(
+    require __DIR__ . '/config/app.php',
+    require __DIR__ . '/config/logging.php',
+    require __DIR__ . '/config/services.php'
+));
+$app->addService('commandRegistry', new CommandRegistry((array) $app->config->app_path));
 
 // Without a command, show the general help.
 if (count($argv) < 2) {
@@ -70,7 +78,7 @@ try {
 } catch (Throwable $exception) {
     DolibarrHelper::log('uncaught ' . get_class($exception) . ': ' . $exception->getMessage(), LOG_ERR);
     fwrite(STDERR, 'Error: ' . $exception->getMessage() . "\n");
-    if ($app->config->trace) {
+    if ('1' === getenv('DOLICLI_DEBUG')) {
         fwrite(STDERR, $exception->getTraceAsString() . "\n");
     }
     exit(1);

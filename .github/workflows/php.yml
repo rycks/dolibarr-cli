@@ -1,36 +1,45 @@
-name: PHP Composer
+name: PHP
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+
+    - uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: sqlite3, pdo_sqlite, zip, mbstring, posix
 
     - name: Validate composer.json and composer.lock
-      run: composer validate --strict
+      run: composer validate
 
     - name: Cache Composer packages
-      id: composer-cache
-      uses: actions/cache@v2
+      uses: actions/cache@v4
       with:
         path: vendor
-        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+        key: ${{ runner.os }}-php-${{ hashFiles('composer.lock') }}
         restore-keys: |
           ${{ runner.os }}-php-
 
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
-    - name: Check code style
-      run: composer test:lint
+    - name: Check syntax and code style
+      run: make lint
+
+    - name: Static analysis
+      run: vendor/bin/phpstan analyse -c .phpstan.github.neon --memory-limit=1G --no-progress
 
     - name: Run test suite
-      run: composer test:unit
+      run: vendor/bin/pest
+
+    - name: Build the phar
+      run: vendor/bin/box compile

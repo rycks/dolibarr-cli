@@ -18,6 +18,7 @@ use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Throwable;
+use RuntimeException;
 
 class UpgradeController extends Command
 {
@@ -338,7 +339,7 @@ Notes:
             // Step 5: database
             $this->rawOutput("Step 5/6: Running database migration...\n");
             if ( ! $this->migrateDatabase($toVersion, $this->lastUpgradeVersion())) {
-                throw new \RuntimeException('Database migration failed');
+                throw new RuntimeException('Database migration failed');
             }
 
             // Step 6: cleanup
@@ -387,10 +388,10 @@ Notes:
                 }
             }
 
-            throw new \RuntimeException("No htdocs/ directory found in the archive of {$version}");
+            throw new RuntimeException("No htdocs/ directory found in the archive of {$version}");
         }
 
-        throw new \RuntimeException("Download of Dolibarr {$version} failed: ".Http::lastError());
+        throw new RuntimeException("Download of Dolibarr {$version} failed: ".Http::lastError());
     }
 
     private function verifySignature(string $sourcePath, string $version): void
@@ -398,11 +399,11 @@ Notes:
         $url = sprintf(FileSignature::REMOTE_URL, $version);
         $xml = Http::get($url, 60);
         if (null === $xml) {
-            throw new \RuntimeException("Cannot download the official signature {$url}: ".Http::lastError().' (use --skip-verify to bypass)');
+            throw new RuntimeException("Cannot download the official signature {$url}: ".Http::lastError().' (use --skip-verify to bypass)');
         }
         $root = FileSignature::parse($xml);
         if (null === $root) {
-            throw new \RuntimeException("Invalid signature file {$url}");
+            throw new RuntimeException("Invalid signature file {$url}");
         }
 
         $result = FileSignature::compare($root, $sourcePath);
@@ -418,7 +419,7 @@ Notes:
                 $this->error('  ... and '.(count($problems) - 20).' more');
             }
 
-            throw new \RuntimeException(count($problems)." file(s) differ from the official signature of {$version}: upgrade aborted, nothing was changed");
+            throw new RuntimeException(count($problems)." file(s) differ from the official signature of {$version}: upgrade aborted, nothing was changed");
         }
     }
 
@@ -459,14 +460,14 @@ Notes:
     {
         $backupDir = $parent.'/dolibarr_backup_'.$version.'_'.date('Ymd_His');
         if ( ! mkdir($backupDir, 0700)) {
-            throw new \RuntimeException("Cannot create backup directory {$backupDir}");
+            throw new RuntimeException("Cannot create backup directory {$backupDir}");
         }
 
         $this->runTool(['cp', '-a', DOL_DOCUMENT_ROOT, $backupDir.'/htdocs'], 'File backup failed');
 
         $backup = new DatabaseBackup();
         if ( ! $backup->dumpDatabase($backupDir.'/database.sql')) {
-            throw new \RuntimeException('Database backup failed: '.$backup->getLastError());
+            throw new RuntimeException('Database backup failed: '.$backup->getLastError());
         }
 
         $this->rotateBackups($parent, $backupDir);
@@ -699,7 +700,7 @@ Notes:
     {
         $dir = sys_get_temp_dir().'/dolicli-upgrade-'.bin2hex(random_bytes(8));
         if ( ! mkdir($dir, 0700)) {
-            throw new \RuntimeException("Cannot create working directory {$dir}");
+            throw new RuntimeException("Cannot create working directory {$dir}");
         }
 
         return $dir;
@@ -886,7 +887,7 @@ Notes:
 
         DolibarrHelper::log('upgrade: '.$message, LOG_ERR);
         if ($throw) {
-            throw new \RuntimeException($message);
+            throw new RuntimeException($message);
         }
         $this->error($message);
 

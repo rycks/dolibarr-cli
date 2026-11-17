@@ -1,4 +1,8 @@
 {
-    "directories": ["."],
-    "main": "dolibarr"
+    "main": "dolibarr",
+    "output": "dolicli.phar",
+    "directories": ["app", "config", "vendor/minicli", "vendor/symfony/polyfill-mbstring"],
+    "files": ["LICENSE"],
+    "exclude-composer-files": true,
+    "exclude-dev-files": true
 }

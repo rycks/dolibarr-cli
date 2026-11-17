@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\User;
 
+use App\Util\DolibarrHelper;
 use App\Support\Command;
 use User;
 
@@ -56,7 +57,7 @@ Without newpass= nor --password-stdin, the password is asked without echo.');
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
         $u = new User($db);
         $res = $u->fetch(0, $login);
         if ($res <= 0) {

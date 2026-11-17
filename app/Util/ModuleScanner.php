@@ -19,9 +19,9 @@ final class ModuleScanner
     {
         global $db;
 
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-        require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
-        require_once DOL_DOCUMENT_ROOT.'/core/modules/DolibarrModules.class.php';
+        DolibarrHelper::requireCore('core/lib/admin.lib.php');
+        DolibarrHelper::requireCore('core/lib/functions2.lib.php');
+        DolibarrHelper::requireCore('core/modules/DolibarrModules.class.php');
 
         $modules = [];
         foreach (dolGetModulesDirs() as $dir) {

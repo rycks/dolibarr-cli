@@ -9,6 +9,14 @@ use User;
 class DolibarrHelper
 {
     /**
+     * Load a file of the Dolibarr core, path relative to htdocs/ (core/lib/admin.lib.php...).
+     */
+    public static function requireCore(string $relativePath): void
+    {
+        require_once DOL_DOCUMENT_ROOT.'/'.ltrim($relativePath, '/');
+    }
+
+    /**
      * Write a message in the Dolibarr log (syslog module), prefixed with dolicli.
      */
     public static function log(string $message, int $level = LOG_INFO): void
@@ -74,7 +82,7 @@ class DolibarrHelper
             return null;
         }
 
-        require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+        DolibarrHelper::requireCore('user/class/user.class.php');
         $user = new User($db);
         if ($user->fetch(0, $login) <= 0) {
             self::log('getFirstSuperAdminUser: cannot fetch user '.$login.': '.$user->error, LOG_ERR);
