@@ -27,7 +27,7 @@ type: "module-dolibarr"
 - **Utilisateurs** : créer, afficher, lister, verrouiller, changer un mot de passe (saisie masquée), générer une clé API.
 - **Modules** : lister, activer, désactiver.
 - **Mise à jour de Dolibarr** : versions disponibles, nouveaux fichiers vérifiés contre la signature officielle et basculés par renommage, migration version par version, retour des fichiers immédiat.
-- **Mode maintenance**, **clé des travaux planifiés (CRON_KEY)**, **intégrité des fichiers**, **réparation de la base**, **tiers**, **sauvegarde**, **anonymisation** d'une copie de la base.
+- **Mode maintenance**, **clé des travaux planifiés (CRON_KEY)**, **liste des travaux planifiés**, **intégrité des fichiers**, **réparation de la base**, **tiers**, **sauvegarde**, **anonymisation** d'une copie de la base.
 - **Supervision** : fichier d'état par instance, contrôles rapides et lents, formats Prometheus et Nagios, modèle Zabbix.
 - **Pilote** : inventaire partageable, ciblage par instance, serveur ou étiquette, écritures en série avec instance témoin, journal, opérations longues détachées, tableau de bord local.
 
@@ -43,6 +43,7 @@ type: "module-dolibarr"
 | Système | `system cronkey show\|set\|generate\|clear` | Gérer la clé de sécurité des travaux planifiés |
 | Système | `system filecheck` | Vérifier l'intégrité des fichiers déployés |
 | Système | `system php`, `system status`, `system sessions` | PHP disponibles, état immédiat, sessions |
+| Travaux planifiés | `cron list` | Lister les travaux planifiés, en échec, en retard ou bloqués |
 | Utilisateur | `user list\|show\|add\|edit\|password\|token` | Gérer les utilisateurs |
 | Module | `module list\|activate\|deactivate` | Gérer les modules |
 | Réparation | `repair run` | Exécuter une action de réparation |

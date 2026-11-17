@@ -66,6 +66,7 @@ final class Registry
             \Dolicli\Command\System\CronkeyGenerateCommand::class,
             \Dolicli\Command\System\CronkeyClearCommand::class,
             \Dolicli\Command\System\FilecheckCommand::class,
+            \Dolicli\Command\Cron\ListCommand::class,
             \Dolicli\Command\BackupCommand::class,
             \Dolicli\Command\Repair\RunCommand::class,
             \Dolicli\Command\Anonymize\RunCommand::class,

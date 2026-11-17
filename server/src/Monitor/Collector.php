@@ -2,6 +2,7 @@
 
 namespace Dolicli\Monitor;
 
+use Dolicli\Dolibarr\CronJobs;
 use Dolicli\Dolibarr\Dolibarr;
 use Dolicli\Dolibarr\Maintenance;
 use Dolicli\Dolibarr\Modules;
@@ -34,10 +35,10 @@ final class Collector
     const SLOW = 'slow';
 
     /** Margin before a job whose next run date is past counts as late (seconds). */
-    const CRON_STALE_MARGIN = 3600;
+    const CRON_STALE_MARGIN = CronJobs::STALE_MARGIN;
 
     /** A job marked as running for longer than this is stuck (seconds). */
-    const CRON_STUCK_AFTER = 21600;
+    const CRON_STUCK_AFTER = CronJobs::STUCK_AFTER;
 
     /** @var Instance */
     private $instance;
@@ -171,20 +172,15 @@ final class Collector
 
                 return State::check('ok', $count, $count . ' active users', $frequency);
             case 'cron.failed':
-                $count = $this->count('SELECT COUNT(*) AS nb FROM ' . MAIN_DB_PREFIX . "cronjob WHERE status = 1 AND lastresult IS NOT NULL AND lastresult <> '' AND lastresult <> '0'"
-                    . ' AND entity IN (0, ' . $this->entity() . ')');
+                $count = $this->countCronJobs(CronJobs::failedCondition());
 
                 return $this->thresholded('cron.failed', $count, $count . ' active scheduled jobs whose last run failed', $frequency);
             case 'cron.stale':
-                $limit = Dolibarr::db()->idate(time() - self::CRON_STALE_MARGIN);
-                $count = $this->count('SELECT COUNT(*) AS nb FROM ' . MAIN_DB_PREFIX . "cronjob WHERE status = 1 AND processing = 0 AND datenextrun IS NOT NULL AND datenextrun < '" . $limit . "'"
-                    . ' AND entity IN (0, ' . $this->entity() . ')');
+                $count = $this->countCronJobs(CronJobs::lateCondition(time()));
 
                 return $this->thresholded('cron.stale', $count, $count . ' active scheduled jobs late by more than ' . self::CRON_STALE_MARGIN . ' s', $frequency);
             case 'cron.stuck':
-                $limit = Dolibarr::db()->idate(time() - self::CRON_STUCK_AFTER);
-                $count = $this->count('SELECT COUNT(*) AS nb FROM ' . MAIN_DB_PREFIX . "cronjob WHERE processing = 1 AND datelastrun IS NOT NULL AND datelastrun < '" . $limit . "'"
-                    . ' AND entity IN (0, ' . $this->entity() . ')');
+                $count = $this->countCronJobs(CronJobs::stuckCondition(time()));
 
                 return $this->thresholded('cron.stuck', $count, $count . ' scheduled jobs running for more than ' . self::CRON_STUCK_AFTER . ' s', $frequency);
             case 'storage.free_bytes':
@@ -253,6 +249,11 @@ final class Collector
         global $conf;
 
         return isset($conf->entity) ? (int) $conf->entity : 1;
+    }
+
+    private function countCronJobs(string $condition): int
+    {
+        return $this->count('SELECT COUNT(*) AS nb FROM ' . MAIN_DB_PREFIX . 'cronjob WHERE ' . $condition . ' AND ' . CronJobs::entityCondition());
     }
 
     private function count(string $sql): int

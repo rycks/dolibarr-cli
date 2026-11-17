@@ -146,6 +146,22 @@ dolicli system cronkey clear
 
 `CRON_KEY` est le paramètre `securitykey` de l'URL `public/cron/cron_run_jobs_by_url.php` qui déclenche les travaux planifiés en HTTP. `show` masque la clé sans `--show-secrets` ; `generate` crée une clé de 32 caractères hexadécimaux et l'affiche une seule fois ; `clear` supprime la clé, et Dolibarr refuse alors tout déclenchement par URL. Le script `scripts/cron/cron_run_jobs.php` n'en a pas besoin. Pensez à mettre à jour la tâche qui appelle l'URL quand la clé change.
 
+### Travaux planifiés
+
+```bash
+dolicli cron list [--failed] [--late] [--stuck]
+```
+
+Liste les travaux planifiés de l'entité courante et de l'entité 0 : libellé, état (`enabled`, `disabled`, ou `archived` pour un travail archivé), fréquence, dernière exécution et son résultat (`ok` ou `failed`), première ligne de la dernière sortie (200 caractères au plus), prochaine exécution, exécution en cours. Les problèmes viennent en tête (bloqués, en échec, en retard), puis l'ordre alphabétique des libellés.
+
+Les définitions sont celles des contrôles `cron.failed`, `cron.stale` et `cron.stuck` de la supervision :
+
+- `--failed` : travaux actifs dont la dernière exécution a échoué ;
+- `--late` : travaux actifs, pas en cours d'exécution, dont la date de prochaine exécution est dépassée de plus d'une heure ;
+- `--stuck` : travaux marqués en cours d'exécution depuis plus de 6 heures.
+
+Les options se cumulent (un travail est retenu s'il répond à l'une d'elles) ; sans option, tous les travaux sont listés. Les totaux `failed`, `late` et `stuck` du résultat comptent toujours tous les travaux de l'instance, quelles que soient les options.
+
 ### Intégrité des fichiers
 
 ```bash
