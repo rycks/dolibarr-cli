@@ -162,10 +162,29 @@ function runProcess(array $cmd, ?string $stdin, array $env, string $cwd): array
         fwrite($pipes[0], $stdin);
     }
     fclose($pipes[0]);
-    $out = (string) stream_get_contents($pipes[1]);
-    $err = (string) stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
 
-    return ['code' => proc_close($process), 'out' => $out, 'err' => $err];
+    // Read stdout and stderr together: reading one to its end first deadlocks as soon as the
+    // other fills its pipe buffer (the progress of a long command on stderr).
+    $buffers = [1 => '', 2 => ''];
+    $open = [1 => $pipes[1], 2 => $pipes[2]];
+    foreach ($open as $pipe) {
+        stream_set_blocking($pipe, false);
+    }
+    while ([] !== $open) {
+        $read = array_values($open);
+        $write = null;
+        $except = null;
+        if (false === stream_select($read, $write, $except, 5)) {
+            break;
+        }
+        foreach ($open as $index => $pipe) {
+            $buffers[$index] .= (string) fread($pipe, 65536);
+            if (feof($pipe)) {
+                fclose($pipe);
+                unset($open[$index]);
+            }
+        }
+    }
+
+    return ['code' => proc_close($process), 'out' => $buffers[1], 'err' => $buffers[2]];
 }

@@ -111,6 +111,22 @@ final class Context
     }
 
     /**
+     * documents/ of the instance: DOL_DATA_ROOT once Dolibarr is loaded, read in conf.php otherwise.
+     */
+    public function dataRoot(): string
+    {
+        if (defined('DOL_DATA_ROOT')) {
+            return (string) constant('DOL_DATA_ROOT');
+        }
+        $dataRoot = $this->instance()->dataRoot();
+        if ('' === $dataRoot || !is_dir($dataRoot)) {
+            throw Failure::environment('DOCUMENTS_NOT_FOUND', "Cannot find the documents directory of {$this->instance()->htdocs()} (dolibarr_main_data_root in conf.php).");
+        }
+
+        return $dataRoot;
+    }
+
+    /**
      * @return Instance|null
      */
     public function instanceIfResolved()

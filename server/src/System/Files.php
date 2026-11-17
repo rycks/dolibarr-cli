@@ -15,7 +15,11 @@ final class Files
      */
     public static function writeAtomic(string $path, string $content, int $mode = 0640)
     {
-        $dir = dirname($path);
+        // tempnam() returns a resolved path: compare with the resolved directory
+        // (DOL_DATA_ROOT is often written htdocs/../documents).
+        $real = realpath(dirname($path));
+        $dir = false === $real ? dirname($path) : $real;
+        $path = $dir . '/' . basename($path);
         $tmp = @tempnam($dir, '.' . basename($path) . '.');
         if (false === $tmp || dirname($tmp) !== $dir) {
             if (is_string($tmp)) {

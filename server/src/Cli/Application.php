@@ -62,6 +62,9 @@ final class Application
     /** @var bool */
     private $dolibarrLoaded = false;
 
+    /** @var string documents/ of the instance whose lock was taken: journal of the write */
+    private $journalRoot = '';
+
     /**
      * @param array<int, mixed> $argv Full argument vector, program name first
      * @param bool $fromStream True when the arguments come from the stream of the ephemeral mode
@@ -169,9 +172,10 @@ final class Application
         $data = [];
         $failure = null;
         try {
-            if ($this->dolibarrLoaded && $command->isWrite() && !$ctx->dryRun()) {
-                $this->lock = Lock::forDataRoot(DOL_DATA_ROOT);
+            if ($this->usesInstanceData($command) && $command->isWrite() && !$ctx->dryRun()) {
+                $this->lock = Lock::forDataRoot($ctx->dataRoot());
                 $this->lock->acquire($command->name());
+                $this->journalRoot = $ctx->dataRoot();
             }
             $data = $command->execute($ctx);
         } catch (Failure $f) {
@@ -401,7 +405,9 @@ final class Application
 
             return;
         }
-        if (null !== $this->command) {
+        if (isset($data['dry_run']) && true === $data['dry_run'] && isset($data['actions']) && is_array($data['actions'])) {
+            $this->console->out("Dry run, nothing written. Actions:\n  - " . implode("\n  - ", array_map([Text::class, 'line'], $data['actions'])) . "\n");
+        } elseif (null !== $this->command) {
             $this->console->out($this->command->renderText($data));
         }
         foreach ($errors as $error) {
@@ -419,6 +425,15 @@ final class Application
         return Failure::operation('INTERNAL_ERROR', get_class($e) . ': ' . $e->getMessage());
     }
 
+    /**
+     * Commands working on the data of an instance: with Dolibarr loaded, or on an instance
+     * whose documents/ is read in conf.php (switch of files, restore).
+     */
+    private function usesInstanceData(Command $command): bool
+    {
+        return $this->dolibarrLoaded || ($command->needsInstance() && !$command->needsDolibarr());
+    }
+
     private function releaseLock()
     {
         if (null !== $this->lock) {
@@ -432,13 +447,11 @@ final class Application
      */
     private function journal()
     {
-        if (!$this->dolibarrLoaded || null === $this->command || null === $this->ctx) {
+        if ('' === $this->journalRoot || null === $this->command || null === $this->ctx) {
             return;
         }
-        if (!$this->command->isWrite() || $this->ctx->dryRun() || ExitCode::LOCKED === $this->exitCode) {
-            return;
-        }
-        $journal = Journal::forDataRoot(DOL_DATA_ROOT);
+        $journal = Journal::forDataRoot($this->journalRoot);
+        $this->journalRoot = '';
         $journal->record(
             $this->command->name(),
             $this->ctx->args()->describe($this->command->sensitiveParams()),

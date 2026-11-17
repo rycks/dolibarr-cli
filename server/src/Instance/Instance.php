@@ -99,6 +99,22 @@ final class Instance
     }
 
     /**
+     * documents/ directory (dolibarr_main_data_root of conf.php, read without executing it),
+     * empty string when it cannot be read.
+     */
+    public function dataRoot(): string
+    {
+        $reader = PhpFileReader::fromFile($this->confFile());
+        $dataRoot = null === $reader ? null : $reader->variable('dolibarr_main_data_root');
+        if (!is_string($dataRoot) || '' === $dataRoot) {
+            return '';
+        }
+        $real = realpath($dataRoot);
+
+        return false === $real ? rtrim($dataRoot, '/') : $real;
+    }
+
+    /**
      * Version of the files, read in filefunc.inc.php without loading Dolibarr.
      */
     public function filesVersion(): string

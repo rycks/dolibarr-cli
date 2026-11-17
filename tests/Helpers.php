@@ -79,8 +79,13 @@ function restoreTestDb(): void
         throw new RuntimeException('Cannot restore the SQLite Dolibarr database');
     }
     foreach ((array) scandir(DOLICLI_TEST_DOCUMENTS) as $file) {
+        if ( ! is_string($file) || '.' === $file || '..' === $file || in_array($file, $GLOBALS['dolicliInitialDocuments'], true)) {
+            continue;
+        }
         $path = DOLICLI_TEST_DOCUMENTS.'/'.$file;
-        if (is_string($file) && is_file($path) && ! in_array($file, $GLOBALS['dolicliInitialDocuments'], true)) {
+        if (is_dir($path) && ! is_link($path)) {
+            exec('rm -rf '.escapeshellarg($path));
+        } else {
             unlink($path);
         }
     }

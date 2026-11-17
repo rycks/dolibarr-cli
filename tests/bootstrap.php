@@ -34,7 +34,7 @@ if ( ! is_file(DOLICLI_TEST_DB)) {
 define('DOLICLI_TEST_DOCUMENTS', dirname(DOLICLI_TEST_DB));
 $GLOBALS['dolicliInitialDocuments'] = array_values(array_filter(
     (array) scandir(DOLICLI_TEST_DOCUMENTS),
-    static fn ($f): bool => is_string($f) && is_file(DOLICLI_TEST_DOCUMENTS.'/'.$f)
+    static fn ($f): bool => is_string($f) && '.' !== $f && '..' !== $f
 ));
 
 // The server tests run the built body: build it once for the run, in the private directory.
