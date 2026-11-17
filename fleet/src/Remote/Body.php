@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dolifleet\Remote;
 
+use Dolicli\Cli\Stream;
 use Symfony\Component\Process\Process;
 use RuntimeException;
 
@@ -72,21 +73,16 @@ final class Body
     }
 
     /**
-     * Stream of the ephemeral mode: the arguments in a global namespace block (a namespace
-     * declaration must be the first statement of a file), then the body. Files sent along
-     * (setup: body, launcher, instances.ini) are base64 in $DOLICLI_FILES.
+     * Stream of the ephemeral mode (built by the body's own Stream class): the arguments in
+     * $DOLICLI_ARGV, the files sent along (setup: body, launcher, instances.ini) base64 in
+     * $DOLICLI_FILES, then the body as a string run with eval(), so that it can run itself again.
      *
      * @param list<string> $arguments
      * @param array<string, string> $files
      */
     public function stream(array $arguments, array $files = []): string
     {
-        $prefix = '<?php namespace { $DOLICLI_ARGV = '.var_export(array_merge(['dolicli'], $arguments), true).';';
-        if ([] !== $files) {
-            $prefix .= ' $DOLICLI_FILES = '.var_export(array_map('base64_encode', $files), true).';';
-        }
-
-        return $prefix.' } ?>'.$this->content;
+        return Stream::build(array_merge(['dolicli'], $arguments), $this->content, $files);
     }
 
     /**

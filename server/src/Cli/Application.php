@@ -3,6 +3,7 @@
 namespace Dolicli\Cli;
 
 use Dolicli\Command\HelpCommand;
+use Dolicli\Dolibarr\Descriptors;
 use Dolicli\Dolibarr\Loader;
 use Dolicli\System\Journal;
 use Dolicli\System\Lock;
@@ -65,6 +66,9 @@ final class Application
     /** @var string documents/ of the instance whose lock was taken: journal of the write */
     private $journalRoot = '';
 
+    /** @var string Working directory at start, before the loader enters htdocs */
+    private $cwd;
+
     /**
      * @param array<int, mixed> $argv Full argument vector, program name first
      * @param bool $fromStream True when the arguments come from the stream of the ephemeral mode
@@ -79,6 +83,8 @@ final class Application
         $this->console = null === $console ? Console::standard() : $console;
         $this->registry = null === $registry ? Registry::standard() : $registry;
         $this->loader = new Loader();
+        $cwd = getcwd();
+        $this->cwd = is_string($cwd) ? $cwd : '';
         register_shutdown_function([$this, 'shutdown']);
     }
 
@@ -193,7 +199,8 @@ final class Application
 
     /**
      * Shutdown function: a premature exit (exit() inside Dolibarr, fatal error) becomes
-     * an error envelope with exit code 3, after the cleanups.
+     * an error envelope with exit code 3, after the cleanups. When it happened while a module
+     * descriptor was loading, the error names it; module list runs again without it instead.
      */
     public function shutdown()
     {
@@ -203,7 +210,13 @@ final class Application
         $loading = self::STATE_LOADING === $this->state;
         $fatal = error_get_last();
         $isFatal = null !== $fatal && in_array($fatal['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true);
+        $descriptor = Descriptors::interrupted();
 
+        if (!$loading && null !== $descriptor) {
+            $this->descriptorStopped($descriptor, $isFatal ? $fatal : null);
+
+            return;
+        }
         if ($loading) {
             $printed = $this->loader->discardOutput();
             $reason = $isFatal ? 'Fatal error while loading Dolibarr: ' . $fatal['message'] : 'Dolibarr stopped while loading: database unreachable or invalid configuration';
@@ -221,6 +234,57 @@ final class Application
             $this->ctx->runCleanups();
         }
         $this->releaseLock();
+        $this->finish([], $failure);
+        $this->journal();
+        exit($this->exitCode);
+    }
+
+    /**
+     * PHP stopped while a module descriptor was loading (exit(), die(), fatal error): an error
+     * naming the file, or, for module list, the answer of a child process run without it.
+     *
+     * @param array{file: string, module: string, output: array<int, string>} $descriptor
+     * @param array{type: int, message: string, file: string, line: int}|null $fatal
+     */
+    private function descriptorStopped(array $descriptor, $fatal)
+    {
+        $file = $descriptor['file'];
+        $module = $descriptor['module'];
+        if (null !== $fatal) {
+            $code = 'FATAL_ERROR';
+            $reason = 'stopped PHP with a fatal error: ' . $fatal['message'];
+            $message = "Fatal error while loading {$file} (module {$module}): {$fatal['message']} in {$fatal['file']}:{$fatal['line']}";
+        } else {
+            $code = 'PREMATURE_EXIT';
+            $reason = 'ended the process (exit or die)';
+            $message = "The process ended while loading {$file} (module {$module}): exit or die in the module descriptor";
+        }
+        Log::error($message);
+        if (null !== $this->ctx) {
+            $this->ctx->runCleanups();
+        }
+        $this->releaseLock();
+
+        if (null !== $this->command && $this->command->toleratesFailedDescriptors()) {
+            $skipped = Descriptors::skippedFromEnvironment();
+            if (Descriptors::isCore($file)) {
+                $message .= ' (core module, never left out)';
+            } elseif (count($skipped) >= Descriptors::MAX_SKIPPED) {
+                $message .= ' (' . count($skipped) . ' module descriptors already left out, no further attempt)';
+            } else {
+                $skipped[] = ['class' => $module, 'file' => $file, 'reason' => $reason];
+                $relaunch = new Relaunch($this->argv, $this->fromStream, $this->format);
+                $exitCode = $relaunch->run($skipped, $this->cwd, $this->console);
+                if (null !== $exitCode) {
+                    $this->state = self::STATE_DONE;
+                    $this->exitCode = $exitCode;
+                    exit($exitCode);
+                }
+                $message .= ' (cannot run again without it: ' . ($relaunch->possible() ? 'the child process did not start' : $relaunch->unavailable()) . ')';
+            }
+        }
+
+        $failure = new Failure($code, $message . '.', ExitCode::ENVIRONMENT, ['file' => $file, 'module' => $module, 'output' => $descriptor['output']]);
         $this->finish([], $failure);
         $this->journal();
         exit($this->exitCode);

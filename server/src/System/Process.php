@@ -29,8 +29,9 @@ final class Process
      * @param string|null $stdoutFile Write stdout in this file instead of capturing it
      * @param string|null $cwd
      * @param callable|null $onOutput Receives stdout chunks as they arrive (when not written to a file)
+     * @param string|null $stdin Written to the standard input of the process (/dev/null when null)
      */
-    public function run(array $command, array $env = [], $stdoutFile = null, $cwd = null, $onOutput = null): int
+    public function run(array $command, array $env = [], $stdoutFile = null, $cwd = null, $onOutput = null, $stdin = null): int
     {
         $this->exitCode = -1;
         $this->stdout = '';
@@ -45,7 +46,7 @@ final class Process
             }
         }
         $descriptors = [
-            0 => ['file', '/dev/null', 'r'],
+            0 => null === $stdin ? ['file', '/dev/null', 'r'] : ['pipe', 'r'],
             1 => null === $stdoutFile ? ['pipe', 'w'] : ['file', $stdoutFile, 'w'],
             2 => ['pipe', 'w'],
         ];
@@ -65,12 +66,47 @@ final class Process
         stream_set_blocking($pipes[2], false);
         $streams[2] = $pipes[2];
 
-        while ([] !== $streams) {
+        // The input is written as the process reads it, while its output is read: writing it all
+        // first would block as soon as the process fills its output pipe.
+        $input = null;
+        $offset = 0;
+        $ended = null;
+        if (null !== $stdin) {
+            $input = $pipes[0];
+            stream_set_blocking($input, false);
+            if ('' === $stdin) {
+                fclose($input);
+                $input = null;
+            }
+        }
+
+        while ([] !== $streams || null !== $input) {
             $read = array_values($streams);
-            $write = null;
+            $write = null === $input ? null : [$input];
             $except = null;
             if (false === @stream_select($read, $write, $except, 1)) {
                 break;
+            }
+            if (null !== $input) {
+                // Non-blocking: 0 bytes when the pipe is full.
+                $written = @fwrite($input, substr($stdin, $offset, 65536));
+                if (0 === $written) {
+                    // Before PHP 7.4, writing to a closed pipe may return 0 instead of false.
+                    // The exit code is collected by the first proc_get_status() after the end: kept.
+                    $ended = proc_get_status($process);
+                    $written = $ended['running'] ? 0 : false;
+                }
+                if (false === $written) {
+                    Log::error('cannot write the standard input of ' . $command[0] . ' (it ended before reading it)');
+                    fclose($input);
+                    $input = null;
+                } else {
+                    $offset += $written;
+                    if ($offset >= strlen($stdin)) {
+                        fclose($input);
+                        $input = null;
+                    }
+                }
             }
             foreach ($streams as $index => $stream) {
                 $chunk = (string) fread($stream, 65536);
@@ -91,7 +127,7 @@ final class Process
             }
         }
 
-        $status = proc_get_status($process);
+        $status = null !== $ended && !$ended['running'] ? $ended : proc_get_status($process);
         $code = proc_close($process);
         // proc_close() returns -1 when proc_get_status() already collected the exit code.
         $this->exitCode = (!$status['running'] && $status['exitcode'] >= 0) ? (int) $status['exitcode'] : $code;

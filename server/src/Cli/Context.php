@@ -24,7 +24,7 @@ final class Context
     /** @var Instance|null */
     private $instance;
 
-    /** @var array<int, array{code: string, message: string}> */
+    /** @var array<int, array{code: string, message: string, details?: array<string, mixed>}> */
     private $warnings = [];
 
     /** @var array<int, array{code: string, message: string}> */
@@ -156,10 +156,16 @@ final class Context
 
     /**
      * Warning for the envelope (and stderr in text format).
+     *
+     * @param array<string, mixed> $details Machine-readable details, in the envelope only
      */
-    public function warn(string $code, string $message)
+    public function warn(string $code, string $message, array $details = [])
     {
-        $this->warnings[] = ['code' => $code, 'message' => $message];
+        $warning = ['code' => $code, 'message' => $message];
+        if ([] !== $details) {
+            $warning['details'] = $details;
+        }
+        $this->warnings[] = $warning;
         Log::warning($message);
         if ('text' === $this->format) {
             $this->console->warning($message);
@@ -167,7 +173,7 @@ final class Context
     }
 
     /**
-     * @return array<int, array{code: string, message: string}>
+     * @return array<int, array{code: string, message: string, details?: array<string, mixed>}>
      */
     public function warnings(): array
     {

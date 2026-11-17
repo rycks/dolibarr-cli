@@ -121,6 +121,8 @@ dolicli module activate --all [--include-unstable] [--yes]
 dolicli module deactivate --all [--yes]
 ```
 
+Un module externe dont le descripteur arrête PHP pendant son chargement (`exit`, `die`, erreur fatale, exception) n'empêche plus `module list` de répondre : la liste arrive sans lui, il est nommé dans `excluded` (classe, fichier, raison) avec un avertissement `MODULE_DESCRIPTOR_FAILED`. Dolicli se relance pour cela sans le descripteur fautif, au plus cinq fois. Un module du cœur de Dolibarr n'est jamais écarté. Les autres commandes qui chargent les descripteurs s'arrêtent sur une erreur (`PREMATURE_EXIT` ou `FATAL_ERROR`) qui nomme le fichier ; ce que le module a affiché n'est jamais écrit sur la sortie standard, ses dernières lignes sont dans l'erreur.
+
 `name` accepte la classe (`modFacture`) ou le nom court (`Facture`). L'activation inclut les modules dont il dépend, la désactivation ceux qui en dépendent. `--all` (environnements de test) demande une confirmation ; `deactivate --all` garde `modUser` et `modSysLog`, `activate --all` exclut les modules expérimentaux sans `--include-unstable`.
 
 ## Gestion du système

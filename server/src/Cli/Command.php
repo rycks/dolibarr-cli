@@ -145,6 +145,16 @@ abstract class Command
     }
 
     /**
+     * True for a read command that can answer without the module descriptors that stop PHP
+     * while they load (module list): dolicli then runs it again in a child process without them,
+     * instead of failing with an error naming the descriptor.
+     */
+    public function toleratesFailedDescriptors(): bool
+    {
+        return false;
+    }
+
+    /**
      * Group of the command (first word).
      */
     public function group(): string

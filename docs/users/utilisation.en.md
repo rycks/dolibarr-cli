@@ -146,6 +146,8 @@ The generated key is displayed only once. Keep it safe: Dolicli cannot display i
 
 Displays a table with the class, number, name, version, state (active or not), external flag, visibility and publisher of each module.
 
+An external module whose descriptor stops PHP while it loads (`exit`, `die`, fatal error, exception) no longer prevents `module list` from answering: the list comes without it, and the module is named in `excluded` (class, file, reason) with a `MODULE_DESCRIPTOR_FAILED` warning. Dolicli runs itself again without the failing descriptor, at most five times. A core Dolibarr module is never left out. The other commands that load the descriptors stop with an error (`PREMATURE_EXIT` or `FATAL_ERROR`) naming the file; what the module printed never reaches the standard output, its last lines are in the error.
+
 ### Activating a module
 
 ```bash

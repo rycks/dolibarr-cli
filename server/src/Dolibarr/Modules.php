@@ -2,6 +2,8 @@
 
 namespace Dolicli\Dolibarr;
 
+use Dolicli\Cli\ExitCode;
+use Dolicli\Cli\Failure;
 use Dolicli\System\Log;
 use DolibarrModules;
 
@@ -17,6 +19,15 @@ final class Modules
     /** @var array<string, DolibarrModules>|null */
     private static $cache;
 
+    /** @var bool */
+    private static $tolerant = false;
+
+    /** @var array<string, array{class: string, file: string, reason: string}> Descriptors to leave out, by path */
+    private static $skipped = [];
+
+    /** @var array<int, array{class: string, file: string, reason: string}> */
+    private static $excluded = [];
+
     /**
      * @return array<string, DolibarrModules> Module class name => descriptor, sorted by name
      */
@@ -30,6 +41,7 @@ final class Modules
         Dolibarr::requireCore('core/lib/functions2.lib.php');
         Dolibarr::requireCore('core/modules/DolibarrModules.class.php');
 
+        self::$excluded = [];
         $modules = [];
         foreach (dolGetModulesDirs() as $dir) {
             $entries = @scandir($dir);
@@ -45,16 +57,13 @@ final class Modules
                 if (isset($modules[$modName]) || !is_readable($file)) {
                     continue;
                 }
-                // Including a second file declaring an already loaded class is a fatal error.
-                if (!class_exists($modName, false)) {
-                    include_once $file;
-                }
-                if (!class_exists($modName, false)) {
-                    Log::warning("modules: {$file} does not declare class {$modName}");
+                $key = self::pathKey($file);
+                if (isset(self::$skipped[$key]) && !Descriptors::isCore($file)) {
+                    self::$excluded[] = ['class' => $modName, 'file' => $file, 'reason' => self::$skipped[$key]['reason']];
                     continue;
                 }
-                $module = new $modName($db);
-                if ($module instanceof DolibarrModules) {
+                $module = self::load($file, $modName, $db);
+                if (null !== $module) {
                     $modules[$modName] = $module;
                 }
             }
@@ -65,9 +74,86 @@ final class Modules
         return $modules;
     }
 
+    /**
+     * For module list: leave out the given descriptors (dolicli runs again without those that
+     * stopped PHP) and the external descriptors that throw while loading, instead of failing.
+     * Core descriptors are never left out.
+     *
+     * @param array<int, array{class: string, file: string, reason: string}> $skip
+     */
+    public static function tolerateFailures(array $skip)
+    {
+        self::$tolerant = true;
+        self::$skipped = [];
+        foreach ($skip as $entry) {
+            self::$skipped[self::pathKey($entry['file'])] = $entry;
+        }
+        self::forget();
+    }
+
+    /**
+     * Descriptors left out by the last call to all(), in the order they were met.
+     *
+     * @return array<int, array{class: string, file: string, reason: string}>
+     */
+    public static function excluded(): array
+    {
+        return self::$excluded;
+    }
+
     public static function forget()
     {
         self::$cache = null;
+    }
+
+    /**
+     * Include and build one descriptor, watched by Descriptors: if it stops PHP, the shutdown
+     * handler names it. An exception becomes a FATAL_ERROR naming the file, or a left out
+     * descriptor in the tolerant mode of module list.
+     *
+     * @param mixed $db
+     * @return DolibarrModules|null
+     */
+    private static function load(string $file, string $modName, $db)
+    {
+        Descriptors::begin($file, $modName);
+        try {
+            // Including a second file declaring an already loaded class is a fatal error.
+            if (!class_exists($modName, false)) {
+                include_once $file;
+            }
+            $module = class_exists($modName, false) ? new $modName($db) : null;
+        } catch (\Throwable $e) {
+            $failed = Descriptors::interrupted();
+            $reason = 'threw ' . get_class($e) . ': ' . $e->getMessage();
+            Log::error("modules: {$file} {$reason}");
+            if (self::$tolerant && !Descriptors::isCore($file)) {
+                self::$excluded[] = ['class' => $modName, 'file' => $file, 'reason' => $reason];
+
+                return null;
+            }
+            throw new Failure(
+                'FATAL_ERROR',
+                "Fatal error while loading {$file} (module {$modName}): uncaught " . get_class($e) . ': ' . $e->getMessage() . '.',
+                ExitCode::ENVIRONMENT,
+                ['file' => $file, 'module' => $modName, 'output' => null === $failed ? [] : $failed['output']]
+            );
+        }
+        Descriptors::end();
+        if (null === $module) {
+            Log::warning("modules: {$file} does not declare class {$modName}");
+
+            return null;
+        }
+
+        return $module instanceof DolibarrModules ? $module : null;
+    }
+
+    private static function pathKey(string $file): string
+    {
+        $real = realpath($file);
+
+        return false === $real ? $file : $real;
     }
 
     /**
