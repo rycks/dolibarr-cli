@@ -1,7 +1,7 @@
 {
   "name": "rycks/dolibarr-cli",
   "description": "Dolibarr administration from the command line",
-  "license": "GPLv3",
+  "license": "AGPL-3.0-or-later",
   "homepage": "https://github.com/rycks/dolibarr-cli",
   "keywords": [
     "cli",

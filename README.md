@@ -48,3 +48,7 @@ make test       # unit and integration tests, on a SQLite Dolibarr installed by 
 make lint       # php -l and pint
 make phpstan    # needs .phpstan.local.neon: cp .phpstan.example.neon .phpstan.local.neon
 ```
+
+## License
+
+GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later), see [LICENSE](LICENSE).
