@@ -4,75 +4,92 @@ declare(strict_types=1);
 
 namespace App\Command\Thirdparty;
 
-use Minicli\Command\CommandController;
-use Minicli\Input;
+use App\Support\Command;
 
-class ListController extends CommandController
+class ListController extends Command
 {
+    private const TYPES = [
+        'all' => '1 = 1',
+        'customer' => 't.client IN (1, 3)',
+        'prospect' => 't.client IN (2, 3)',
+        'supplier' => 't.fournisseur = 1',
+    ];
 
     public function usage(): void
     {
-        $cmd = implode(" ", $this->getArgs());
+        $this->info('List Dolibarr third parties
 
-        $this->info("Usage:
- - $cmd limit=10 (get only 10 results)
- - $cmd offset=20 (get results after 20 first)
- - $cmd search=xxxx (display only matched thirdparty name)");
+Usage:
+  ./dolibarr thirdparty list [type=all|customer|prospect|supplier] [search=TEXT] [limit=N] [offset=N]
+
+Parameters:
+  type=TYPE    - Kind of third party (default: all)
+  search=TEXT  - Only names matching TEXT
+  limit=N      - At most N results
+  offset=N     - Skip the N first results
+
+Columns: id, name, email, customer (yes/prospect/no), supplier.');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-        $force = false;
-        $this->info('Get list of dolibarr thirdparties');
+        global $db;
+
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        $limit = 0;
-        if ($this->hasParam('limit')) {
-            $limit = $this->getParam('limit');
+        $type = $this->param('type') ?? 'all';
+        if ( ! isset(self::TYPES[$type])) {
+            $this->fail("Invalid type={$type}: use ".implode(', ', array_keys(self::TYPES)).'.');
+
+            return;
         }
-        $offset = 0;
-        if ($this->hasParam('offset')) {
-            $offset = $this->getParam('offset');
-        }
-        $search = '';
-        if ($this->hasParam('search')) {
-            $search = $this->getParam('search');
+        $limit = (int) ($this->param('limit') ?? 0);
+        $offset = (int) ($this->param('offset') ?? 0);
+        if ($limit < 0 || $offset < 0) {
+            $this->fail('limit and offset must be positive numbers.');
+
+            return;
         }
 
-        $sql = "SELECT t.rowid";
-        $sql .= " FROM " . MAIN_DB_PREFIX . "societe as t";
-        $sql .= " WHERE t.client IN (1,2,3)"; // see societe.class.php, 0=no customer, 1=customer, 2=prospect, 3=customer and prospect
-        // you can customize that part of SQL for your specific situation
-        //$sql .= " AND (code_compta IS NULL OR code_compta LIKE '411%' OR code_compta='')";
-        if ($search != '') {
-            $sql .= natural_search("t.nom", $search);
+        if ( ! $this->requireDolibarr()) {
+            return;
         }
 
+        $sql = 'SELECT t.rowid, t.nom, t.email, t.client, t.fournisseur FROM '.MAIN_DB_PREFIX.'societe as t';
+        $sql .= ' WHERE '.self::TYPES[$type];
+        $sql .= ' AND t.entity IN ('.getEntity('societe').')';
+        $search = $this->param('search');
+        if (null !== $search && '' !== $search) {
+            $sql .= natural_search('t.nom', $search);
+        }
+        $sql .= ' ORDER BY t.nom';
         if ($limit > 0) {
             $sql .= $db->plimit($limit, $offset);
         }
 
-        $result = $db->query($sql);
-        $content = [];
-        $content[] = ['id', 'name', 'email'];
-        if ($result) {
-            while ($obj = $db->fetch_object($result)) {
-                $soc_static = new \Societe($db);
-                if ($soc_static->fetch($obj->rowid)) {
-                    $content[] = [
-                        $soc_static->id,
-                        $soc_static->name,
-                        $soc_static->email ?? '',
-                    ];
-                }
-            }
-            $this->printTable($content);
-        } else {
-            $this->error("Can't fetch list !");
+        $resql = $db->query($sql);
+        if ( ! $resql) {
+            $this->fail("Can't fetch third parties: ".$db->lasterror());
+
+            return;
         }
+
+        $customer = [0 => 'no', 1 => 'yes', 2 => 'prospect', 3 => 'yes'];
+        $content = [['id', 'name', 'email', 'customer', 'supplier']];
+        while ($obj = $db->fetch_object($resql)) {
+            $content[] = [
+                (string) $obj->rowid,
+                (string) $obj->nom,
+                (string) $obj->email,
+                $customer[(int) $obj->client] ?? 'no',
+                1 === (int) $obj->fournisseur ? 'yes' : 'no',
+            ];
+        }
+
+        $this->printTable($content);
     }
 }

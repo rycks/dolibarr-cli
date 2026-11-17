@@ -4,17 +4,18 @@ declare(strict_types=1);
 
 namespace App\Command\Thirdparty;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
 
-class DefaultController extends CommandController
+class DefaultController extends Command
 {
     public function handle(): void
     {
-        $cmd = implode(" ",$this->getArgs());
+        $this->info('Dolibarr third party management
 
-        $this->info("All of dolibarr cli for thirdparty manipulation
 Usage:
- - $cmd accountingnumber --help
- - $cmd list --help");
+  ./dolibarr thirdparty list [type=...] [search=...]   - List third parties
+  ./dolibarr thirdparty accountingnumber [--confirm]   - Recompute customer accounting codes
+
+Add --help to any command for its options.');
     }
 }

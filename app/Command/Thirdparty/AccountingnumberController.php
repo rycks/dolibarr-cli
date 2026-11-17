@@ -4,70 +4,123 @@ declare(strict_types=1);
 
 namespace App\Command\Thirdparty;
 
-use Minicli\Command\CommandController;
-use Minicli\Input;
+use App\Support\Command;
+use Societe;
 
-class AccountingnumberController extends CommandController
+class AccountingnumberController extends Command
 {
-
     public function usage(): void
     {
-        $this->info("As this part could be specific for each dolibarr setup please open and update that file :\n"
-            . __FILE__ . "  \n");
+        $this->info('Recompute the customer accounting code of third parties (customers and prospects)
+with the numbering rule set in Dolibarr (Setup > Modules > Third parties > Accounting code).
 
+Usage:
+  ./dolibarr thirdparty accountingnumber [filters] [--confirm]
+
+Without --confirm, nothing is written: the table shows the codes that would be set.
+
+Filters:
+  --only-empty   - Only third parties without accounting code
+  prefix=411     - Only third parties whose current code starts with this prefix
+  id=12          - Only this third party
+
+Options:
+  --confirm      - Write the new codes
+  --help         - Display this help message
+
+The command stops at the first error (exit code 1).');
     }
 
     public function handle(): void
     {
-        global $db, $conf;
-        $force = false;
-        $this->info('Update accounting number for all dolibarr thirdparties (customer + prospect) according with dolibarr setup rules');
+        global $db;
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        require_once DOL_DOCUMENT_ROOT . "/societe/class/societe.class.php";
+        if ( ! $this->requireDolibarr()) {
+            return;
+        }
+        $actingUser = $this->actingUser();
+        if (null === $actingUser) {
+            return;
+        }
 
-        $sql = "SELECT t.rowid";
-        $sql .= " FROM " . MAIN_DB_PREFIX . "societe as t";
-        $sql .= " WHERE t.client IN (1,2,3)"; // see societe.class.php, 0=no customer, 1=customer, 2=prospect, 3=customer and prospect
-        // you can customize that part of SQL for your specific situation
-        //$sql .= " AND (code_compta IS NULL OR code_compta LIKE '411%' OR code_compta='')";
-        $result = $db->query($sql);
-        $content = [];
-        $content[] = ['name', 'code_compta_old', 'code_compta_new'];
-        if ($result) {
-            while ($obj = $db->fetch_object($result)) {
-                $soc_static = new \Societe($db);
-                if ($soc_static->fetch($obj->rowid)) {
-                    $oldcode = $soc_static->code_compta_client;
-                    $newcode = '';
-                    $new = $soc_static->get_codecompta('customer');
-                    if ($new < 0) {
-                        $this->error("Can't get a new accounting code for that thirdpart id=" . $obj->rowid . ", name=" . $soc_static->name);
-                        //exit or not on first error ?
-                        exit();
-                    } else {
-                        $newcode = $soc_static->code_compta_client;
-                        $resupdate = $soc_static->update($obj->rowid, '', 0);
-                        if ($resupdate < 0) {
-                            $this->error("Can't update that thirdpart id=" . $obj->rowid . ", name=" . $soc_static->name . ", error code is=" . $resupdate);
-                            //exit or not on first update error ?
-                            exit();
-                        }
-                    }
-                    $content[] = [
-                        $soc_static->name,
-                        $oldcode,
-                        $newcode
-                    ];
+        require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
+
+        $sql = 'SELECT t.rowid FROM '.MAIN_DB_PREFIX.'societe as t';
+        // client: 0 = none, 1 = customer, 2 = prospect, 3 = customer and prospect
+        $sql .= ' WHERE t.client IN (1, 2, 3)';
+        $sql .= ' AND t.entity IN ('.getEntity('societe').')';
+        if ($this->hasFlag('only-empty')) {
+            $sql .= " AND (t.code_compta IS NULL OR t.code_compta = '')";
+        }
+        $prefix = $this->param('prefix');
+        if (null !== $prefix && '' !== $prefix) {
+            $sql .= " AND t.code_compta LIKE '".$db->escape($db->escapeforlike($prefix))."%'";
+        }
+        $id = $this->param('id');
+        if (null !== $id) {
+            $sql .= ' AND t.rowid = '.((int) $id);
+        }
+        $sql .= ' ORDER BY t.rowid';
+
+        $resql = $db->query($sql);
+        if ( ! $resql) {
+            $this->fail("Can't fetch third parties: ".$db->lasterror());
+
+            return;
+        }
+        $ids = [];
+        while ($obj = $db->fetch_object($resql)) {
+            $ids[] = (int) $obj->rowid;
+        }
+
+        $confirm = $this->hasFlag('confirm');
+        $content = [['id', 'name', 'old code', 'new code']];
+        $changed = 0;
+        foreach ($ids as $socid) {
+            $soc = new Societe($db);
+            if ($soc->fetch($socid) <= 0) {
+                $this->printTable($content);
+                $this->fail("Can't fetch third party id={$socid}: ".$soc->error);
+
+                return;
+            }
+
+            $oldcode = (string) $soc->code_compta_client;
+            if ($soc->get_codecompta('customer') < 0) {
+                $this->printTable($content);
+                $this->fail("Can't compute a new accounting code for third party id={$socid} ({$soc->name}): ".$soc->error);
+
+                return;
+            }
+            $newcode = (string) $soc->code_compta_client;
+
+            if ($confirm && $newcode !== $oldcode) {
+                // 4th argument: without it, Societe::update() does not write code_compta at all.
+                $result = $soc->update($socid, $actingUser, 0, 1);
+                if ($result < 0) {
+                    $this->printTable($content);
+                    $this->fail("Can't update third party id={$socid} ({$soc->name}): ".implode(', ', array_filter(array_merge([$soc->error], (array) $soc->errors))));
+
+                    return;
                 }
             }
-            $this->printTable($content);
+            if ($newcode !== $oldcode) {
+                $changed++;
+            }
+            $content[] = [(string) $socid, (string) $soc->name, $oldcode, $newcode];
+        }
+
+        $this->printTable($content);
+        if ($confirm) {
+            $this->success("{$changed} accounting code(s) updated.");
         } else {
-            $this->error("Can't fetch list !");
+            $this->info("Dry run: {$changed} code(s) would change. Add --confirm to write them.");
         }
     }
 }
