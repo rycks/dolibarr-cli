@@ -35,6 +35,15 @@ final class Dolibarr
         return '' === $value ? $default : (string) $value;
     }
 
+    /**
+     * Escape the wildcards of a LIKE pattern like DoliDB::escapeforlike(), which the database
+     * drivers only have from Dolibarr 16.
+     */
+    public static function escapeForLike(string $text): string
+    {
+        return str_replace(['\\', '_', '%'], ['\\\\', '\\_', '\\%'], $text);
+    }
+
     public static function db(): \DoliDB
     {
         global $db;

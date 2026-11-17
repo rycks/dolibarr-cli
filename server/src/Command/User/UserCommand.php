@@ -43,6 +43,10 @@ abstract class UserCommand extends Command
 
     protected static function isEnabled(User $user): bool
     {
-        return 1 === (int) (isset($user->statut) ? $user->statut : $user->status);
+        // statut before Dolibarr 13, status after (both kept for a while).
+        $properties = get_object_vars($user);
+        $status = isset($properties['statut']) ? $properties['statut'] : (isset($properties['status']) ? $properties['status'] : 0);
+
+        return 1 === (int) $status;
     }
 }

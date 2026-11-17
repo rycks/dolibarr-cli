@@ -58,7 +58,7 @@ final class AccountingnumberCommand extends Command
         }
         $prefix = (string) $ctx->value('prefix');
         if ('' !== $prefix) {
-            $sql .= " AND t.code_compta LIKE '" . $db->escape($db->escapeforlike($prefix)) . "%'";
+            $sql .= " AND t.code_compta LIKE '" . $db->escape(Dolibarr::escapeForLike($prefix)) . "%'";
         }
         if (null !== $ctx->value('id')) {
             $sql .= ' AND t.rowid = ' . ((int) $ctx->value('id'));
