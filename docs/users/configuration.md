@@ -43,7 +43,12 @@ source ~/.bashrc
 
 ## Chemin par défaut
 
-Si `DOLPATH` n'est pas défini, Dolicli cherche un dossier `htdocs/` dans le répertoire courant. Ce comportement convient si vous placez Dolicli à la racine de votre installation Dolibarr.
+Si `DOLPATH` n'est pas défini, Dolicli cherche un dossier `htdocs/` dans le répertoire depuis lequel la commande est lancée (et non dans le dossier de Dolicli). Ce comportement convient si vous lancez Dolicli depuis la racine de votre installation Dolibarr, c'est-à-dire le dossier qui contient `htdocs/` :
+
+```bash
+cd /var/www/dolibarr
+/chemin/vers/dolicli/dolibarr user list
+```
 
 ## Vérification
 

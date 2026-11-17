@@ -62,7 +62,7 @@ Le paramètre `name` accepte le nom de la classe PHP du module (`modFacture`) ou
 Précisez le chemin complet vers PHP et vers Dolicli, et exportez `DOLPATH` :
 
 ```bash
-0 2 * * * DOLPATH=/var/www/dolibarr/htdocs/ /chemin/vers/dolicli/dolibarr backup --database dir=/var/backups/dolibarr
+0 2 * * * DOLPATH=/var/www/dolibarr/htdocs/ /usr/bin/php /chemin/vers/dolicli/dolibarr backup --database dir=/var/backups/dolibarr
 ```
 
 ## Sécurité
@@ -73,7 +73,7 @@ Non. L'anonymisation est définitive et irréversible. Elle est destinée à une
 
 ### La clé API est-elle affichée en clair ?
 
-Oui, la clé est affichée une seule fois lors de sa génération. Il n'est pas possible de le retrouver ensuite via Dolicli. Conservez-le immédiatement dans un gestionnaire de mots de passe ou un fichier sécurisé.
+Oui, la clé est affichée une seule fois lors de sa génération. Il n'est pas possible de la retrouver ensuite via Dolicli. Conservez-la immédiatement dans un gestionnaire de mots de passe ou un fichier sécurisé.
 
 ### Le mode maintenance bloque-t-il les accès API ?
 
