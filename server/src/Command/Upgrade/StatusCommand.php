@@ -55,6 +55,35 @@ final class StatusCommand extends Command
             'plan' => [] === $plan ? null : $plan,
             'lease' => [] === $lease ? null : $lease,
             'php_cli' => PHP_VERSION,
+            'free_bytes' => [
+                'htdocs_parent' => (int) @disk_free_space(dirname(DOL_DOCUMENT_ROOT)),
+                'documents' => (int) @disk_free_space(DOL_DATA_ROOT),
+            ],
+            'htdocs_bytes' => self::size(DOL_DOCUMENT_ROOT),
         ];
+    }
+
+    /**
+     * Size of a tree (symbolic links not followed), bounded to 60 s; -1 when too long.
+     */
+    private static function size(string $dir): int
+    {
+        $deadline = microtime(true) + 60;
+        $total = 0;
+        try {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $file) {
+                if ($file instanceof \SplFileInfo && $file->isFile() && !$file->isLink()) {
+                    $total += $file->getSize();
+                }
+                if (microtime(true) > $deadline) {
+                    return -1;
+                }
+            }
+        } catch (\Exception $e) {
+            return -1;
+        }
+
+        return $total;
     }
 }

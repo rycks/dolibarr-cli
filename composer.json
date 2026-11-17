@@ -10,9 +10,6 @@
     "erp"
   ],
   "autoload-dev": {
-    "psr-4": {
-      "Dolicli\\": "server/src/"
-    },
     "classmap": [
       "build/lib/"
     ]
@@ -51,7 +48,8 @@
   },
   "autoload": {
     "psr-4": {
-      "Dolifleet\\": "fleet/src/"
+      "Dolifleet\\": "fleet/src/",
+      "Dolicli\\": "server/src/"
     }
   }
 }

@@ -216,3 +216,50 @@ it('adds a server and the instances found on it to a new inventory', function ()
         ->and($inventory->servers())->toHaveKey('local-b')
         ->and(fleet(['add', 'local-b'], null, ['DOLIFLEET_INVENTORY' => $file])['code'])->toBe(2);
 });
+
+it('computes an upgrade plan from the state of the instance', function (): void {
+    $result = fleetJson(['upgrade', 'plan', 'dev2', '--to=19.0.0']);
+    $plan = $result['json'];
+
+    expect($result['code'])->toBe(0)
+        ->and($plan['from'])->toBe('18.0.10')
+        ->and($plan['blockers'])->toBe([])
+        ->and(array_column($plan['steps'], 'id'))->toBe(['lease', 'maintenance', 'cron', 'modules-off', 'backup', 'archive', 'deploy', 'switch-files', 'migration', 'finalize', 'verify', 'reopen'])
+        ->and($plan['steps'][8]['migrations'])->toBe([['from' => '18.0.0', 'to' => '19.0.0']])
+        ->and($plan['php_cli'])->not->toBe('')
+        ->and(implode(' ', $plan['warnings']))->toContain('web_php is not declared')
+        ->and(is_file(DOLICLI_TEST_TMP.'/fleet/data/dolifleet/plans/dev2.json'))->toBeTrue()
+        ->and(fleet(['upgrade', 'plan', 'dev2', '--to=18.0.9'])['code'])->toBe(1);
+});
+
+it('runs an upgrade plan step by step and stops with the maintenance on when a step fails', function (): void {
+    $instance = isolatedInstance();
+    $release = fakeRelease('18.0.11');
+    $archive = dirname($release['tree']).'/dolibarr-18.0.11.tgz';
+    exec('tar -czf '.escapeshellarg($archive).' -C '.escapeshellarg(dirname($release['tree'])).' htdocs');
+    $account = (string) (posix_getpwuid(posix_geteuid())['name'] ?? '');
+    fleetInventory("  local-iso:\n    php: ".PHP_BINARY."\n    instances:\n      iso:\n        htdocs: {$instance['htdocs']}\n        run_as: {$account}\n        maintenance_login: admin\n");
+
+    fleetJson(['upgrade', 'plan', 'iso', '--to=18.0.11']);
+    $run = fleetJson(['upgrade', 'run', 'iso', '--yes', '--archive='.$archive, '--signature='.$release['signature']]);
+    $progress = $run['json']['plan']['progress'];
+    $isoDb = new PDO('sqlite:'.$instance['documents'].'/database_dolibarr.sdb');
+
+    expect($run['code'])->toBe(1)
+        ->and($run['json']['state'])->toBe('failed')
+        ->and($progress['lease']['state'])->toBe('done')
+        ->and($progress['backup']['state'])->toBe('done')
+        ->and($progress['deploy']['state'])->toBe('done')
+        ->and($progress['switch-files']['state'])->toBe('done')
+        ->and($progress['migration']['state'])->toBe('failed')
+        ->and(file_get_contents($instance['htdocs'].'/main.inc.php'))->toContain('main of 18.0.11')
+        ->and(glob($instance['htdocs'].'.old-*'))->toHaveCount(1)
+        ->and(glob($instance['root'].'/*-database.sql'))->toHaveCount(1)
+        ->and($isoDb->query("SELECT value FROM llx_const WHERE name = 'MAIN_ONLY_LOGIN_ALLOWED'")->fetchColumn())->toBe('admin')
+        ->and(implode("\n", $run['json']['plan']['recovery']))->toContain('upgrade restore-files');
+
+    $restore = fleetJson(['exec', 'iso', '--yes', '--', 'upgrade', 'restore-files']);
+
+    expect($restore['code'])->toBe(0)
+        ->and(is_link($instance['htdocs'].'/main.inc.php'))->toBeTrue();
+});

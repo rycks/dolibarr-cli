@@ -16,6 +16,7 @@ use Dolifleet\Command\MaintenanceCommand;
 use Dolifleet\Command\SessionsCommand;
 use Dolifleet\Command\SetupCommand;
 use Dolifleet\Command\StatusCommand;
+use Dolifleet\Command\UpgradeCommand;
 use Symfony\Component\Console\Application;
 use RuntimeException;
 
@@ -40,6 +41,7 @@ final class Kernel
             new BackupCommand(),
             new SessionsCommand(),
             new JobsCommand(),
+            new UpgradeCommand(),
         ]);
 
         return $application;

@@ -148,6 +148,8 @@ final class Modules
      */
     public static function describe(string $modName, DolibarrModules $module): array
     {
+        $properties = get_object_vars($module);
+
         return [
             'class' => $modName,
             'number' => (int) $module->numero,
@@ -157,6 +159,23 @@ final class Modules
             'external' => self::isExternal($module),
             'hidden' => !empty($module->hidden),
             'publisher' => html_entity_decode(strip_tags((string) $module->getPublisher()), ENT_QUOTES),
+            // Optional properties of the descriptors, read without assuming they are declared.
+            'need_dolibarr_version' => self::versionOf(isset($properties['need_dolibarr_version']) ? $properties['need_dolibarr_version'] : null),
+            'phpmin' => self::versionOf(isset($properties['phpmin']) ? $properties['phpmin'] : null),
         ];
+    }
+
+    /**
+     * Version declared by a descriptor as an array (array(16, 0)) or a string, empty when none.
+     *
+     * @param mixed $value
+     */
+    private static function versionOf($value): string
+    {
+        if (is_array($value)) {
+            return implode('.', array_map('strval', $value));
+        }
+
+        return is_scalar($value) ? (string) $value : '';
     }
 }

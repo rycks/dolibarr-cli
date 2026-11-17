@@ -188,3 +188,55 @@ function runProcess(array $cmd, ?string $stdin, array $env, string $cwd): array
 
     return ['code' => proc_close($process), 'out' => $buffers[1], 'err' => $buffers[2]];
 }
+
+/**
+ * Isolated instance: an htdocs made of symbolic links to the test Dolibarr, its own conf.php
+ * and a copy of documents/. The upgrade commands can rename it without touching the shared one.
+ *
+ * @return array{root: string, htdocs: string, documents: string}
+ */
+function isolatedInstance(): array
+{
+    $root = DOLICLI_TEST_TMP.'/instance-'.bin2hex(random_bytes(4));
+    $htdocs = $root.'/htdocs';
+    $documents = $root.'/documents';
+    mkdir($htdocs.'/conf', 0755, true);
+    mkdir($documents, 0755, true);
+    foreach (scandir(DOLICLI_DOLPATH) as $entry) {
+        if ( ! in_array($entry, ['.', '..', 'conf'], true)) {
+            symlink(DOLICLI_DOLPATH.'/'.$entry, $htdocs.'/'.$entry);
+        }
+    }
+    $conf = (string) file_get_contents(DOLICLI_DOLPATH.'/conf/conf.php');
+    $conf = str_replace(
+        ["dirname(__DIR__) . '/../documents'", "\$dolibarr_main_document_root=dirname(__DIR__);", "dirname(__DIR__) . '/custom'"],
+        [var_export($documents, true), '$dolibarr_main_document_root='.var_export($htdocs, true).';', var_export($htdocs.'/custom', true)],
+        $conf
+    );
+    file_put_contents($htdocs.'/conf/conf.php', $conf);
+    copy(DOLICLI_TEST_DB, $documents.'/database_dolibarr.sdb');
+    file_put_contents($htdocs.'/robots-local.txt', "local file\n");
+
+    return ['root' => $root, 'htdocs' => $htdocs, 'documents' => $documents];
+}
+
+/**
+ * Small release tree of a given version, and its signature.
+ *
+ * @return array{tree: string, signature: string}
+ */
+function fakeRelease(string $version, bool $corrupt = false): array
+{
+    $tree = DOLICLI_TEST_TMP.'/release-'.bin2hex(random_bytes(4)).'/htdocs';
+    mkdir($tree.'/install', 0755, true);
+    file_put_contents($tree.'/main.inc.php', "<?php\n// main of {$version}\n");
+    file_put_contents($tree.'/filefunc.inc.php', "<?php\nif (!defined('DOL_VERSION')) {\n\tdefine('DOL_VERSION', '{$version}');\n}\n");
+    file_put_contents($tree.'/install/upgrade.php', "<?php\n");
+    $signature = dirname($tree).'/filelist-'.$version.'.xml';
+    file_put_contents($signature, '<?xml version="1.0"?><checksum_list><dolibarr_htdocs_dir>'
+        .'<md5file name="/main.inc.php">'.($corrupt ? md5('other') : md5_file($tree.'/main.inc.php')).'</md5file>'
+        .'<md5file name="/filefunc.inc.php">'.md5_file($tree.'/filefunc.inc.php').'</md5file>'
+        .'</dolibarr_htdocs_dir></checksum_list>');
+
+    return ['tree' => $tree, 'signature' => $signature];
+}
