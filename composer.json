@@ -14,7 +14,7 @@
     }
   },
   "bin": [
-    "bin/dolicli"
+    "dolibarr"
   ],
   "require": {
     "php": ">=8.2",
@@ -22,12 +22,14 @@
     "minicli/command-help": "^1.0"
   },
   "require-dev": {
-    "pestphp/pest": "^1.23",
-    "laravel/pint": "^1.10",
-    "humbug/box": "^4.6"
+    "pestphp/pest": "^3.8",
+    "laravel/pint": "^1.30",
+    "humbug/box": "^4.7",
+    "phpstan/phpstan": "^2.1",
+    "cap-rel/dolibarr-integration-sqlite": "18.0.x-dev"
   },
   "scripts": {
-    "build": "@php bin/build.php",
+    "build": "box compile",
     "lint": [
       "pint"
     ],
@@ -40,6 +42,9 @@
     "test": [
       "@test:lint",
       "@test:unit"
+    ],
+    "phpstan": [
+      "phpstan analyse --memory-limit=1G"
     ]
   },
   "config": {
