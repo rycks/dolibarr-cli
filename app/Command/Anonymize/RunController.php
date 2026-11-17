@@ -4,49 +4,57 @@ declare(strict_types=1);
 
 namespace App\Command\Anonymize;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
+use App\Util\Anonymizer;
 use App\Util\DolibarrHelper;
-use App\Util\AnonymizeHelper;
-use Exception;
+use App\Util\Maintenance;
+use Throwable;
 
-class RunController extends CommandController
+class RunController extends Command
 {
+    public const OPTIONS_HELP = '  --confirm            Execute the anonymization (otherwise: dry run)
+  --this-is-a-copy     Required with --confirm: state that this database is a copy, not production
+                       (the unalterable log, blockedlog, is purged)
+  --skip-thirdparties  Skip third parties and contacts
+  --skip-users         Skip user accounts
+  --skip-members       Skip members (adherents)
+  --skip-bank          Skip bank and payment data
+  keep-admin=LOGIN     Admin login to preserve (default: first super admin)';
+
+    private ?Maintenance $maintenance = null;
+
     public function usage(): void
     {
-        $this->info("Anonymize all personal data in the Dolibarr database
+        $this->info('Anonymize all personal data in the Dolibarr database
 
 Usage:
   ./dolibarr anonymize run [options]
 
 Options:
-  --confirm            Execute the anonymization (required)
-  --skip-thirdparties  Skip third parties and contacts
-  --skip-users         Skip user accounts
-  --skip-members       Skip members (adherents)
-  --skip-bank          Skip bank/payment data
-  keep-admin=LOGIN     Admin login to preserve (default: first super admin)
+'.self::OPTIONS_HELP.'
 
 What gets anonymized:
-  - Third parties: names, addresses, phones, emails, SIREN/SIRET, TVA
-  - Contacts: names, addresses, phones, emails, birthdays
-  - Users: names, logins, emails, phones, addresses, salary, API keys
-  - Members: names, emails, phones, addresses, login/password
-  - Bank data: IBAN, BIC, account numbers, card details
-  - Communications: email addresses, subjects, content, IPs
-  - Mailings: recipient names, emails
-  - Employment: salary data
+  - Third parties: names, addresses, phones, emails, social networks, SIREN/SIRET, VAT
+  - Contacts, members, users: names, logins, emails, phones, addresses, birthdays,
+    passwords (users and members cannot log in any more, except keep-admin)
+  - Users: salary, API keys, national registration number
+  - Bank data: IBAN/BIC of third parties, users and bank accounts, direct debit lines,
+    bank line issuers and free labels, payment numbers
+  - Communications: events, tickets, security events (emails, subjects, contents, IPs)
+  - Mailings: recipients, unsubscriptions, bodies
+  - HR: job candidates, event attendees
   - Email collectors: login/password credentials
+  - Setup: secret constants (passwords, API keys, tokens) and the company identity
   - Notes: all note_private and note_public fields across all tables
-  - Blocked log: fully purged
-  - Sessions: fully purged
+  - Free text extrafields (varchar, text, html, mail, phone, url)
+  - Blocked log and sessions: fully purged
 
 What is NOT anonymized:
-  - Financial amounts (invoice totals, order amounts)
-  - Document references (FA2024-001, etc.)
-  - Product catalog
-  - The admin account specified by keep-admin
+  - Financial amounts, document references, product catalog
+  - The admin account given by keep-admin
   - Files on disk (documents, attachments)
-  - Extrafields (custom fields)");
+
+Supported databases: MySQL/MariaDB, PostgreSQL, SQLite.');
     }
 
     public function handle(): void
@@ -55,195 +63,192 @@ What is NOT anonymized:
 
         if ($this->hasFlag('help')) {
             $this->usage();
+
             return;
         }
 
-        $keepAdmin = $this->getParam('keep-admin') ?? DolibarrHelper::findFirstSuperAdmin();
-        if ( ! $keepAdmin) {
-            $this->error("No super admin found. Use keep-admin=LOGIN to specify which admin to preserve.");
+        if ( ! $this->requireDolibarr()) {
             return;
         }
 
-        // Load existing data from the database as source for fake data generation
-        AnonymizeHelper::loadFromDatabase($db);
+        $keepAdmin = $this->param('keep-admin') ?? DolibarrHelper::findFirstSuperAdmin();
+        if (null === $keepAdmin || '' === $keepAdmin) {
+            $this->fail('No super admin found: use keep-admin=LOGIN to choose the admin account to preserve.');
 
-        $summary = AnonymizeHelper::getDryRunSummary($db, $keepAdmin);
+            return;
+        }
+
+        $anonymizer = new Anonymizer($db);
+        $skip = [
+            'thirdparties' => $this->hasFlag('skip-thirdparties'),
+            'users' => $this->hasFlag('skip-users'),
+            'members' => $this->hasFlag('skip-members'),
+            'bank' => $this->hasFlag('skip-bank'),
+        ];
+
+        try {
+            $summary = $anonymizer->summary($keepAdmin, $skip);
+        } catch (Throwable $e) {
+            $this->fail('Cannot read the database: '.$e->getMessage());
+
+            return;
+        }
 
         if ( ! $this->hasFlag('confirm')) {
-            $this->showDryRun($summary, $keepAdmin);
+            $this->info("DRY RUN - nothing is changed\n");
+            $this->info("Admin account preserved: {$keepAdmin}\n");
+            $this->rawOutput("  Rows that would be anonymized:\n\n");
+            $this->printSummary($summary);
+            $this->rawOutput("\n");
+            $this->info('To execute, add --confirm --this-is-a-copy');
+
+            return;
+        }
+
+        if ( ! $this->hasFlag('this-is-a-copy')) {
+            $this->fail('Refusing to anonymize without --this-is-a-copy: this purges the unalterable log (blockedlog) and cannot be undone. Run it on a copy of the database only.');
+
             return;
         }
 
         $this->showWarning($summary, $keepAdmin, $conf, $mysoc);
 
-        $this->rawOutput("\n");
-        $this->rawOutput("  Tapez YES en majuscules pour confirmer : ");
-        $answer = trim(fgets(STDIN));
+        $answer = $this->readLine("\n  Type YES in capitals to confirm: ");
+        if ('YES' !== trim((string) $answer)) {
+            $this->info('Aborted.');
 
-        if ('YES' !== $answer) {
-            $this->info("Abandon.");
             return;
         }
 
         $this->rawOutput("\n");
-        $this->execute($db, $conf, $summary, $keepAdmin);
+        $this->execute($db, $anonymizer, $keepAdmin, $skip);
     }
 
-    private function showDryRun(array $summary, string $keepAdmin): void
-    {
-        $this->info("DRY RUN - Apercu de l'anonymisation\n");
-        $this->info("Admin preserve : {$keepAdmin}\n");
-
-        $this->rawOutput("  Donnees qui seraient anonymisees :\n\n");
-        $this->printSummary($summary);
-
-        $this->rawOutput("\n");
-        $this->info("Pour executer, ajoutez le flag --confirm");
-    }
-
+    /**
+     * @param  array<string, int>  $summary
+     */
     private function showWarning(array $summary, string $keepAdmin, object $conf, ?object $mysoc): void
     {
-        $companyName = (isset($mysoc) && ! empty($mysoc->name)) ? $mysoc->name : '(non configure)';
-        $dbHost = $conf->db->host ?? '(inconnu)';
-        $dbName = $conf->db->name ?? '(inconnu)';
-        $dbPort = $conf->db->port ?? '';
-        $serverInfo = $dbHost.($dbPort ? ':'.$dbPort : '');
+        $companyName = (isset($mysoc) && ! empty($mysoc->name)) ? $mysoc->name : '(not set)';
+        $server = ($conf->db->host ?? '?').( ! empty($conf->db->port) ? ':'.$conf->db->port : '');
 
         $this->rawOutput("\n");
-        $this->rawOutput("  ╔══════════════════════════════════════════════════════════════╗\n");
-        $this->rawOutput("  ║                    ATTENTION - DANGER                        ║\n");
-        $this->rawOutput("  ╠══════════════════════════════════════════════════════════════╣\n");
-        $this->rawOutput("  ║                                                              ║\n");
-        $this->rawOutput("  ║  Cette operation va ANONYMISER DEFINITIVEMENT toutes les      ║\n");
-        $this->rawOutput("  ║  donnees personnelles de cette base Dolibarr.                 ║\n");
-        $this->rawOutput("  ║                                                              ║\n");
-        $this->rawOutput("  ║  Cette action est IRREVERSIBLE.                               ║\n");
-        $this->rawOutput("  ║                                                              ║\n");
-        $this->rawOutput("  ╚══════════════════════════════════════════════════════════════╝\n");
-        $this->rawOutput("\n");
+        $this->rawOutput("  +--------------------------------------------------------------+\n");
+        $this->rawOutput("  |                     WARNING - DANGER                         |\n");
+        $this->rawOutput("  |                                                              |\n");
+        $this->rawOutput("  |  This PERMANENTLY anonymizes all personal data of this       |\n");
+        $this->rawOutput("  |  Dolibarr database. It cannot be undone.                     |\n");
+        $this->rawOutput("  +--------------------------------------------------------------+\n\n");
 
-        $this->rawOutput("  Societe    : {$companyName}\n");
-        $this->rawOutput("  Serveur    : {$serverInfo}\n");
-        $this->rawOutput("  Base       : {$dbName}\n");
-        $this->rawOutput("  Admin pres.: {$keepAdmin}\n");
-        $this->rawOutput("\n");
-
-        $this->rawOutput("  Donnees qui vont etre anonymisees :\n\n");
+        $this->rawOutput("  Company   : {$companyName}\n");
+        $this->rawOutput("  Server    : {$server}\n");
+        $this->rawOutput('  Database  : '.($conf->db->name ?? '?')."\n");
+        $this->rawOutput("  Kept admin: {$keepAdmin}\n\n");
+        $this->rawOutput("  Rows that will be anonymized:\n\n");
         $this->printSummary($summary);
     }
 
+    /**
+     * @param  array<string, int>  $summary
+     */
     private function printSummary(array $summary): void
     {
         $labels = [
-            'thirdparties'      => 'Tiers',
-            'contacts'          => 'Contacts',
-            'users'             => 'Utilisateurs',
-            'members'           => 'Adherents',
-            'bank_rib'          => 'RIB tiers',
-            'bank_accounts'     => 'Comptes bancaires',
-            'external_accounts' => 'Comptes externes',
-            'communications'    => 'Communications',
-            'mailing_targets'   => 'Cibles mailing',
-            'employment'        => 'Contrats emploi',
-            'email_collectors'  => 'Collecteurs email',
-            'blocked_log'       => 'Blocked log',
-            'sessions'          => 'Sessions',
-            'note_tables'       => 'Tables avec notes',
+            'thirdparties' => 'Third parties',
+            'contacts' => 'Contacts',
+            'users' => 'Users',
+            'employment' => 'Employment contracts',
+            'members' => 'Members',
+            'bank_rib' => 'Bank details (RIB)',
+            'bank_accounts' => 'Bank accounts',
+            'bank_lines' => 'Bank lines',
+            'external_accounts' => 'External accounts',
+            'communications' => 'Communications',
+            'mailing_targets' => 'Mailing recipients',
+            'hr' => 'Candidates, attendees',
+            'email_collectors' => 'Email collectors',
+            'blocked_log' => 'Blocked log',
+            'sessions' => 'Sessions',
         ];
 
         foreach ($labels as $key => $label) {
-            if (isset($summary[$key]) && $summary[$key] > 0) {
-                $value = $summary[$key];
-                $suffix = ('note_tables' === $key) ? ' tables' : ' lignes';
-                $this->rawOutput("    ".str_pad($label, 22).$value.$suffix."\n");
+            if (($summary[$key] ?? 0) > 0) {
+                $this->rawOutput('    '.str_pad($label, 24).$summary[$key]." rows\n");
             }
         }
     }
 
-    private function execute(object $db, object $conf, array $summary, string $keepAdmin): void
+    /**
+     * @param  array<string, bool>  $skip
+     */
+    private function execute(object $db, Anonymizer $anonymizer, string $keepAdmin, array $skip): void
     {
-        $wasInMaintenanceMode = ! empty($conf->global->MAIN_ONLY_LOGIN_ALLOWED);
-        if ( ! $wasInMaintenanceMode) {
-            require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
-            $this->info("Activation du mode maintenance...");
-            dolibarr_set_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $keepAdmin, 'chaine', 0, 'Anonymization in progress', $conf->entity);
+        $this->maintenance = new Maintenance();
+        $login = $this->maintenance->enable('Anonymization in progress', $keepAdmin);
+        if (null === $login) {
+            $this->fail($this->maintenance->lastError());
+
+            return;
         }
+        register_shutdown_function([$this, 'leaveMaintenance']);
 
         $db->begin();
 
         try {
-            if ( ! $this->hasFlag('skip-thirdparties')) {
-                $count = AnonymizeHelper::anonymizeThirdparties($db);
-                $this->success("Tiers              : {$count} lignes anonymisees");
-
-                $count = AnonymizeHelper::anonymizeContacts($db);
-                $this->success("Contacts           : {$count} lignes anonymisees");
+            if ( ! $skip['thirdparties']) {
+                $this->report('Third parties', $anonymizer->anonymizeThirdparties());
+                $this->report('Contacts', $anonymizer->anonymizeContacts());
             }
-
-            if ( ! $this->hasFlag('skip-users')) {
-                $count = AnonymizeHelper::anonymizeUsers($db, $keepAdmin);
-                $this->success("Utilisateurs       : {$count} lignes anonymisees");
-
-                $count = AnonymizeHelper::anonymizeEmployment($db);
-                $this->success("Contrats emploi    : {$count} lignes anonymisees");
+            if ( ! $skip['users']) {
+                $this->report('Users', $anonymizer->anonymizeUsers($keepAdmin));
+                $this->report('Employment contracts', $anonymizer->anonymizeEmployment());
             }
-
-            if ( ! $this->hasFlag('skip-members')) {
-                $count = AnonymizeHelper::anonymizeMembers($db);
-                $this->success("Adherents          : {$count} lignes anonymisees");
+            if ( ! $skip['members']) {
+                $this->report('Members', $anonymizer->anonymizeMembers());
             }
-
-            if ( ! $this->hasFlag('skip-bank')) {
-                $count = AnonymizeHelper::anonymizeBankData($db);
-                $this->success("Donnees bancaires  : {$count} lignes anonymisees");
-
-                $count = AnonymizeHelper::anonymizeExternalAccounts($db);
-                $this->success("Comptes externes   : {$count} lignes anonymisees");
+            if ( ! $skip['bank']) {
+                $this->report('Bank data', $anonymizer->anonymizeBankData());
+                $this->report('External accounts', $anonymizer->anonymizeExternalAccounts());
             }
-
-            $count = AnonymizeHelper::anonymizeCommunications($db);
-            $this->success("Communications     : {$count} lignes anonymisees");
-
-            $count = AnonymizeHelper::anonymizeMailings($db);
-            $this->success("Mailings           : {$count} lignes anonymisees");
-
-            $count = AnonymizeHelper::anonymizeEmailCollectors($db);
-            $this->success("Collecteurs email  : {$count} lignes anonymisees");
+            $this->report('Communications', $anonymizer->anonymizeCommunications());
+            $this->report('Mailings', $anonymizer->anonymizeMailings());
+            $this->report('Candidates, attendees', $anonymizer->anonymizeHr());
+            $this->report('Email collectors', $anonymizer->anonymizeEmailCollectors());
+            $this->report('Setup constants', $anonymizer->anonymizeConstants());
 
             $this->rawOutput("\n");
-            $this->info("Nettoyage des notes...");
-            $noteResults = AnonymizeHelper::clearNotes($db);
-            $notesCleared = 0;
-            foreach ($noteResults as $table => $count) {
-                if ($count > 0) {
-                    $this->rawOutput("  {$table}: {$count} lignes\n");
-                    $notesCleared += $count;
-                }
-            }
-            $this->success("Notes              : {$notesCleared} lignes nettoyees");
-
-            $this->rawOutput("\n");
-            $count = AnonymizeHelper::truncateBlockedLog($db);
-            $this->success("Blocked log        : {$count} lignes supprimees");
-
-            $count = AnonymizeHelper::truncateSessions($db);
-            $this->success("Sessions           : {$count} lignes supprimees");
+            $this->report('Notes', array_sum($anonymizer->clearNotes()));
+            $this->report('Text extrafields', array_sum($anonymizer->clearTextExtrafields()));
+            $this->report('Blocked log (purged)', $anonymizer->purgeTable('blockedlog'));
+            $this->report('Sessions (purged)', $anonymizer->purgeTable('session'));
 
             $db->commit();
 
             $this->rawOutput("\n");
-            $this->success("Anonymisation terminee avec succes !");
-            $this->info("Rappel : les fichiers sur disque (documents, pieces jointes) n'ont pas ete modifies.");
-
-        } catch (Exception $e) {
+            $this->success('Anonymization completed.');
+            $this->info('Reminder: files on disk (documents, attachments) were not modified.');
+        } catch (Throwable $e) {
             $db->rollback();
-            $this->error("Erreur : ".$e->getMessage());
-            $this->error("Toutes les modifications ont ete annulees (rollback).");
+            $this->fail('Anonymization failed, every change was rolled back: '.$e->getMessage());
         } finally {
-            if ( ! $wasInMaintenanceMode) {
-                dolibarr_del_const($db, 'MAIN_ONLY_LOGIN_ALLOWED', $conf->entity);
-                $this->info("Mode maintenance desactive.");
-            }
+            $this->leaveMaintenance();
         }
+    }
+
+    public function leaveMaintenance(): void
+    {
+        if (null === $this->maintenance || ! $this->maintenance->wasEnabledByUs()) {
+            return;
+        }
+        if ($this->maintenance->disable()) {
+            $this->info('Maintenance mode disabled.');
+        } else {
+            $this->fail('Cannot disable maintenance mode: run ./dolibarr system maintenance disable');
+        }
+    }
+
+    private function report(string $label, int $count): void
+    {
+        $this->success(str_pad($label, 24).': '.$count.' rows');
     }
 }

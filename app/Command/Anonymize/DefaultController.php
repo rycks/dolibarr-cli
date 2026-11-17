@@ -4,31 +4,24 @@ declare(strict_types=1);
 
 namespace App\Command\Anonymize;
 
-use Minicli\Command\CommandController;
+use App\Support\Command;
 
-class DefaultController extends CommandController
+class DefaultController extends Command
 {
     public function handle(): void
     {
-        $cmd = implode(" ", $this->getArgs());
-
-        $this->info("Anonymize all personal data in the Dolibarr database
+        $this->info('Anonymize all personal data in the Dolibarr database
 
 Usage:
-  {$cmd} run [options]
+  ./dolibarr anonymize run [options]
 
 Options:
-  --confirm            Execute the anonymization (required, otherwise dry-run)
-  --skip-thirdparties  Skip third parties and contacts
-  --skip-users         Skip user accounts
-  --skip-members       Skip members (adherents)
-  --skip-bank          Skip bank/payment data
-  keep-admin=LOGIN     Admin login to preserve (default: first super admin)
+'.RunController::OPTIONS_HELP.'
 
 Examples:
-  ./dolibarr anonymize run                          Show what would be anonymized
-  ./dolibarr anonymize run --confirm                Execute full anonymization
-  ./dolibarr anonymize run --confirm --skip-bank    Skip bank data
-  ./dolibarr anonymize run --confirm keep-admin=admin");
+  ./dolibarr anonymize run                                    Show what would be anonymized
+  ./dolibarr anonymize run --confirm --this-is-a-copy         Execute full anonymization
+  ./dolibarr anonymize run --confirm --this-is-a-copy --skip-bank
+  ./dolibarr anonymize run --confirm --this-is-a-copy keep-admin=admin');
     }
 }
