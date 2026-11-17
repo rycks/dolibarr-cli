@@ -17,7 +17,7 @@ description: "Téléchargement, installation et configuration initiale de Dolicl
 Clonez le dépôt Git sur votre serveur :
 
 ```bash
-git clone git@github.com:rycks/dolibarr-cli.git dolicli
+git clone https://github.com/rycks/dolibarr-cli.git dolicli
 cd dolicli
 ```
 
@@ -28,6 +28,17 @@ Installez les dépendances PHP via Composer :
 ```bash
 composer install --no-dev
 ```
+
+## Variante : un seul fichier (phar)
+
+Dolicli peut être construit en un seul fichier exécutable, sans Composer sur le serveur cible. Sur un poste de développement :
+
+```bash
+composer install
+make phar
+```
+
+Copiez ensuite `dolicli.phar` sur le serveur et lancez-le avec `php dolicli.phar`, comme `./dolibarr`.
 
 ## Vérification
 
@@ -45,7 +56,9 @@ Si Dolibarr n'est pas détecté, un message vous indique de configurer la variab
 |---------|------|
 | `dolibarr` | Point d'entrée principal (script PHP exécutable) |
 | `app/Command/` | Contrôleurs de commandes organisés par catégorie |
-| `app/Util/` | Classes utilitaires (DolibarrHelper, AnonymizeHelper) |
+| `app/Support/` | Classe de base des commandes (codes de retour, saisies, journalisation) |
+| `app/Util/` | Classes utilitaires (sauvegarde, migration, anonymisation, signature des fichiers...) |
+| `tests/` | Tests unitaires et d'intégration (sur un Dolibarr SQLite installé par Composer) |
 | `config/` | Fichiers de configuration de l'application Minicli |
 | `vendor/` | Dépendances Composer |
 
@@ -55,6 +68,6 @@ Pour mettre à jour Dolicli vers la dernière version :
 
 ```bash
 cd /chemin/vers/dolicli
-git pull origin main
+git pull origin master
 composer install --no-dev
 ```

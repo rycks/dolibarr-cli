@@ -57,6 +57,20 @@ Si la configuration est correcte, Dolicli affiche la version de Dolibarr détect
 
 > **Attention :** Le chemin doit pointer vers le dossier `htdocs/` qui contient le fichier `master.inc.php` de Dolibarr. Si le fichier n'est pas trouvé, Dolicli affiche un message d'erreur et s'arrête.
 
+## Installation multi-sociétés
+
+Par défaut, Dolicli travaille sur la société (entité) 1. Ajoutez `entity=N` à n'importe quelle commande pour travailler sur une autre société :
+
+```bash
+./dolibarr system cronkey show entity=2
+```
+
 ## Mode debug
 
-Le mode debug est activé par défaut dans la configuration de l'application (`config/app.php`). Il permet d'afficher les messages d'erreur détaillés en cas de problème.
+En cas d'erreur inattendue, Dolicli affiche le message d'erreur et se termine avec le code 1. Pour afficher aussi la pile d'appels, définissez `DOLICLI_DEBUG=1` :
+
+```bash
+DOLICLI_DEBUG=1 ./dolibarr user list
+```
+
+Les échecs sont aussi écrits dans le journal de Dolibarr (module Syslog), préfixés par `dolicli:`.

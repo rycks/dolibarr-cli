@@ -8,7 +8,7 @@ description: "Questions fréquentes sur l'installation, la configuration et l'ut
 
 ## Installation et configuration
 
-### Dolicli affiche "Dolibarr sources must be in htdocs subfolder or please set DOLPATH env var"
+### Dolicli affiche "Dolibarr not found in ..."
 
 La variable d'environnement `DOLPATH` n'est pas définie ou pointe vers un chemin incorrect. Vérifiez que le chemin contient bien le fichier `master.inc.php` :
 
@@ -32,7 +32,7 @@ php -v
 
 ### Dolicli fonctionne-t-il avec PostgreSQL ?
 
-La plupart des commandes fonctionnent avec PostgreSQL. La commande `backup --database` ne prend en charge que MySQL/MariaDB pour le moment. L'action de réparation `rebuild_sequences` est spécifique à PostgreSQL.
+Oui. `backup --database` utilise `pg_dump` et l'anonymisation fonctionne aussi avec PostgreSQL (et SQLite). L'action de réparation `rebuild_sequences` est spécifique à PostgreSQL, `force_utf8` et `force_utf8mb4` à MySQL/MariaDB.
 
 ## Utilisation
 
@@ -47,7 +47,7 @@ Ajoutez `--help` à n'importe quelle commande :
 
 ### La commande `user password` échoue sans message clair
 
-Les règles de sécurité de Dolibarr sur les mots de passe sont appliquées (longueur minimale, complexité). Consultez la configuration dans **Administration > Sécurité > Mots de passe** de votre Dolibarr. L'option `--force` permet de contourner ces règles :
+Les règles de sécurité de Dolibarr sur les mots de passe sont appliquées (longueur minimale, complexité) : le message d'erreur indique la règle non respectée. Consultez la configuration dans **Administration > Sécurité > Mots de passe** de votre Dolibarr. L'option `--force` permet de contourner ces règles :
 
 ```bash
 ./dolibarr user password login=admin --force
@@ -55,7 +55,7 @@ Les règles de sécurité de Dolibarr sur les mots de passe sont appliquées (lo
 
 ### La commande `module activate` ne trouve pas le module
 
-Le paramètre `name` attend le nom technique du module (le nom de la classe PHP), par exemple `modFacture` et non `Facture`. Utilisez `./dolibarr module list` pour retrouver le nom exact.
+Le paramètre `name` accepte le nom de la classe PHP du module (`modFacture`) ou son nom court (`Facture`). Utilisez `./dolibarr module list` pour retrouver le nom exact : la première colonne donne la classe.
 
 ### Comment automatiser des commandes dans un cron ?
 
@@ -69,11 +69,11 @@ Précisez le chemin complet vers PHP et vers Dolicli, et exportez `DOLPATH` :
 
 ### L'anonymisation est-elle réversible ?
 
-Non. L'anonymisation est définitive et irréversible. Effectuez toujours une sauvegarde complète avant de lancer la commande `anonymize run --confirm`.
+Non. L'anonymisation est définitive et irréversible. Elle est destinée à une copie de la base : c'est pourquoi `--this-is-a-copy` est exigé en plus de `--confirm`.
 
-### Le token API est-il affiché en clair ?
+### La clé API est-elle affichée en clair ?
 
-Oui, le token est affiché une seule fois lors de sa génération. Il n'est pas possible de le retrouver ensuite via Dolicli. Conservez-le immédiatement dans un gestionnaire de mots de passe ou un fichier sécurisé.
+Oui, la clé est affichée une seule fois lors de sa génération. Il n'est pas possible de le retrouver ensuite via Dolicli. Conservez-le immédiatement dans un gestionnaire de mots de passe ou un fichier sécurisé.
 
 ### Le mode maintenance bloque-t-il les accès API ?
 
@@ -81,11 +81,11 @@ Le mode maintenance restreint la connexion à l'interface web de Dolibarr à un 
 
 ### À quoi sert la commande `system cronkey` ?
 
-Elle gère la constante `CRON_KEY`, qui correspond au paramètre `securitykey` exigé dans l'URL `public/cron/cron_run_jobs.php?securitykey=...`. Vous pouvez l'afficher (`show`), la remplacer par une valeur précise (`set key=...`), en générer une nouvelle aléatoirement (`generate`) ou la supprimer (`clear`). Pensez à mettre à jour la tâche cron système qui appelle ce script chaque fois que vous changez la clé.
+Elle gère la constante `CRON_KEY`, qui correspond au paramètre `securitykey` exigé dans l'URL `public/cron/cron_run_jobs_by_url.php?securitykey=...`. Vous pouvez l'afficher (`show`), la remplacer par une valeur précise (`set key=...`), en générer une nouvelle aléatoirement (`generate`) ou la supprimer (`clear`). Pensez à mettre à jour la tâche planifiée qui appelle cette URL chaque fois que vous changez la clé. Sans clé (`clear`), Dolibarr refuse tout déclenchement par URL.
 
 ## Dépannage
 
-### "Command Not Found" alors que la commande existe
+### "Command not found" alors que la commande existe
 
 Vérifiez la syntaxe : la catégorie et la sous-commande doivent être séparées par un espace. Par exemple `./dolibarr user list` et non `./dolibarr userlist`.
 

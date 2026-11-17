@@ -23,15 +23,16 @@ Certaines opérations d'administration sont plus rapides ou plus pratiques en li
 
 ## Fonctionnalités principales
 
-- **Gestion des utilisateurs** - Créer, afficher, lister, verrouiller/déverrouiller des comptes, changer les mots de passe, générer des tokens API
+- **Gestion des utilisateurs** - Créer, afficher, lister, verrouiller/déverrouiller des comptes, changer les mots de passe (saisie masquée), générer des clés API
 - **Gestion des modules** - Lister, activer et désactiver les modules Dolibarr
-- **Mise à jour de Dolibarr** - Vérifier les versions disponibles, mettre à jour les fichiers et migrer la base de données
+- **Mise à jour de Dolibarr** - Vérifier les versions disponibles, mettre à jour les fichiers (vérifiés contre la signature officielle) et migrer la base de données version par version
 - **Mode maintenance** - Activer et désactiver le mode maintenance depuis le terminal
-- **Clé de sécurité des travaux planifiés (CRON_KEY)** - Afficher, définir, générer ou supprimer la clé `securitykey` utilisée par `cron_run_jobs.php`
+- **Clé de sécurité des travaux planifiés (CRON_KEY)** - Afficher, définir, générer ou supprimer la clé `securitykey` utilisée pour déclencher les travaux planifiés par URL
+- **Intégrité des fichiers** - Comparer les fichiers déployés avec la signature officielle de Dolibarr
 - **Réparation** - Exécuter les fonctions de réparation et de maintenance de la base de données
 - **Tiers** - Lister les tiers et recalculer les codes comptables clients
 - **Sauvegarde** - Exporter la base de données, les documents et les modules
-- **Anonymisation** - Anonymiser les données personnelles de la base de données
+- **Anonymisation** - Anonymiser les données personnelles d'une copie de la base de données
 
 ## Commandes disponibles
 
@@ -40,12 +41,13 @@ Certaines opérations d'administration sont plus rapides ou plus pratiques en li
 | Système | `system upgrade` | Mettre à jour Dolibarr (fichiers et/ou base de données) |
 | Système | `system maintenance` | Gérer le mode maintenance |
 | Système | `system cronkey` | Afficher, définir, générer ou supprimer la clé de sécurité des travaux planifiés (CRON_KEY) |
+| Système | `system filecheck` | Vérifier l'intégrité des fichiers déployés |
 | Utilisateur | `user add` | Créer un utilisateur |
 | Utilisateur | `user show` | Afficher les détails d'un utilisateur |
 | Utilisateur | `user list` | Lister tous les utilisateurs |
 | Utilisateur | `user password` | Changer le mot de passe d'un utilisateur |
 | Utilisateur | `user edit` | Verrouiller ou déverrouiller un compte |
-| Utilisateur | `user token` | Générer un token API |
+| Utilisateur | `user token` | Générer une clé API |
 | Module | `module list` | Lister les modules installés |
 | Module | `module activate` | Activer un module |
 | Module | `module deactivate` | Désactiver un module |
@@ -58,8 +60,8 @@ Certaines opérations d'administration sont plus rapides ou plus pratiques en li
 ## Prérequis
 
 - PHP 8.2 ou supérieur
-- Une installation Dolibarr fonctionnelle et accessible depuis le serveur
-- Composer (pour l'installation des dépendances)
+- Une installation Dolibarr fonctionnelle et accessible depuis le serveur (MySQL/MariaDB, PostgreSQL ou SQLite)
+- Composer (pour l'installation des dépendances), ou le fichier `dolicli.phar`
 
 ## Licence
 
@@ -67,4 +69,4 @@ Dolicli est distribué sous licence GNU Affero General Public License v3 (AGPLv3
 
 ## Support
 
-Le code source est disponible sur [GitHub](https://github.com/dolibarr/dolibarr-cli).
+Le code source est disponible sur [GitHub](https://github.com/rycks/dolibarr-cli).

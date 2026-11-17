@@ -1,6 +1,5 @@
 /tests              export-ignore
 /docs               export-ignore
-/doc                export-ignore
 /.github            export-ignore
 /.phpstan*          export-ignore
 /phpunit.xml        export-ignore
